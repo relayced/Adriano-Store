@@ -143,7 +143,7 @@ export default function App() {
 
   return (
     <>
-      <Navbar session={session} fullName={fullName} />
+      <Navbar session={session} />
 
       {/* ✅ never blocks the site */}
       {session && loadingProfile && (
