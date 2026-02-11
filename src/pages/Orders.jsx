@@ -20,15 +20,22 @@ function normalizeItems(items) {
   return [];
 }
 
+function clean(v) {
+  const s = String(v ?? "").trim();
+  return s ? s : null;
+}
+
 export default function Orders() {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
-
   const [userId, setUserId] = useState("");
 
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState(null);
+
+  // fallback profile (so "—" doesn't happen if order row has null fields)
+  const [fallbackProfile, setFallbackProfile] = useState(null);
 
   async function loadOrders(uid) {
     setLoading(true);
@@ -45,7 +52,6 @@ export default function Orders() {
     setLoading(false);
   }
 
-  // initial load
   useEffect(() => {
     let alive = true;
 
@@ -57,7 +63,6 @@ export default function Orders() {
       const user = auth?.user;
 
       if (!alive) return;
-
       if (authErr) console.error("auth.getUser error:", authErr);
 
       if (!user) {
@@ -77,7 +82,7 @@ export default function Orders() {
     };
   }, []);
 
-  // refresh on focus
+  // refresh on focus (so status updates show)
   useEffect(() => {
     if (!userId) return;
     const onFocus = () => loadOrders(userId);
@@ -85,7 +90,7 @@ export default function Orders() {
     return () => window.removeEventListener("focus", onFocus);
   }, [userId]);
 
-  // realtime updates (needs Realtime enabled on orders table)
+  // realtime updates (if enabled on orders table)
   useEffect(() => {
     if (!userId) return;
 
@@ -108,7 +113,51 @@ export default function Orders() {
     };
   }, [userId]);
 
-  const selectedItems = useMemo(() => normalizeItems(selected?.items), [selected]);
+  const selectedItems = useMemo(
+    () => normalizeItems(selected?.items),
+    [selected]
+  );
+
+  // load fallback profile when opening modal
+  useEffect(() => {
+    let alive = true;
+
+    async function loadProfileFallback() {
+      setFallbackProfile(null);
+      if (!open || !selected?.user_id) return;
+
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("full_name,contact_number,address")
+        .eq("id", selected.user_id)
+        .maybeSingle();
+
+      if (!alive) return;
+
+      if (error) {
+        console.error("fallback profile error:", error);
+        return;
+      }
+      setFallbackProfile(data || null);
+    }
+
+    loadProfileFallback();
+    return () => {
+      alive = false;
+    };
+  }, [open, selected?.user_id]);
+
+  // Order fields first, then fallback to profile
+  const displayNameFor = (o) =>
+    clean(o?.shipping_name) || clean(fallbackProfile?.full_name) || "—";
+  const displayContactFor = (o) =>
+    clean(o?.shipping_contact) ||
+    clean(fallbackProfile?.contact_number) ||
+    "—";
+  const displayAddressFor = (o) =>
+    clean(o?.shipping_address) || clean(fallbackProfile?.address) || "—";
+  const displayPaymentFor = (o) => clean(o?.payment_method) || "—";
+  const displayCouponFor = (o) => clean(o?.coupon_code) || "—";
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-10">
@@ -123,7 +172,8 @@ export default function Orders() {
             <div>
               <h3 className="text-lg font-semibold">Orders</h3>
               <p className="text-xs text-gray-500 mt-1">
-                Your status updates after admin changes it.
+                Old orders (before you added checkout fields) may show “—”. New
+                orders will show full details.
               </p>
             </div>
 
@@ -148,20 +198,21 @@ export default function Orders() {
                     <div className="min-w-0">
                       <div className="font-semibold">Order #{o.id}</div>
                       <div className="text-sm text-gray-600">
-                        {o.created_at ? new Date(o.created_at).toLocaleString() : "—"}
+                        {o.created_at
+                          ? new Date(o.created_at).toLocaleString()
+                          : "—"}
                       </div>
 
-                      {/* ✅ payment + coupon quick info */}
                       <div className="mt-1 text-xs text-gray-500">
-                        {o.payment_method ? `Payment: ${o.payment_method}` : "Payment: —"}
-                        {" • "}
-                        {o.coupon_code ? `Coupon: ${o.coupon_code}` : "Coupon: —"}
+                        Payment: {clean(o.payment_method) || "—"} • Coupon:{" "}
+                        {clean(o.coupon_code) || "—"}
                       </div>
                     </div>
 
                     <div className="text-right shrink-0">
                       <div className="text-sm text-gray-600">
-                        Status: <span className="font-semibold">{o.status || "—"}</span>
+                        Status:{" "}
+                        <span className="font-semibold">{o.status || "—"}</span>
                       </div>
                       <div className="font-semibold">{money(o.total)}</div>
 
@@ -180,13 +231,15 @@ export default function Orders() {
                 </div>
               ))}
 
-              {orders.length === 0 && <p className="text-gray-600">You have no orders yet.</p>}
+              {orders.length === 0 && (
+                <p className="text-gray-600">You have no orders yet.</p>
+              )}
             </div>
           )}
         </section>
       </div>
 
-      {/* ✅ VIEW MODAL with payment + shipping + items */}
+      {/* VIEW MODAL */}
       {open && selected && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
           <div className="w-full max-w-2xl bg-white rounded-2xl border shadow-sm overflow-hidden">
@@ -194,7 +247,9 @@ export default function Orders() {
               <div>
                 <div className="text-lg font-semibold">Order #{selected.id}</div>
                 <div className="text-sm text-gray-600">
-                  {selected.created_at ? new Date(selected.created_at).toLocaleString() : "—"}
+                  {selected.created_at
+                    ? new Date(selected.created_at).toLocaleString()
+                    : "—"}
                 </div>
               </div>
 
@@ -211,7 +266,6 @@ export default function Orders() {
             </div>
 
             <div className="p-5 space-y-4">
-              {/* Summary */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="border rounded-xl p-3">
                   <div className="text-xs text-gray-500">Status</div>
@@ -219,7 +273,7 @@ export default function Orders() {
                 </div>
                 <div className="border rounded-xl p-3">
                   <div className="text-xs text-gray-500">Payment</div>
-                  <div className="font-semibold">{selected.payment_method || "—"}</div>
+                  <div className="font-semibold">{displayPaymentFor(selected)}</div>
                 </div>
                 <div className="border rounded-xl p-3">
                   <div className="text-xs text-gray-500">Total</div>
@@ -227,32 +281,31 @@ export default function Orders() {
                 </div>
               </div>
 
-              {/* Coupon */}
               <div className="border rounded-xl p-4">
                 <div className="font-semibold">Coupon</div>
                 <div className="mt-1 text-sm text-gray-700">
-                  {selected.coupon_code ? selected.coupon_code : "—"}
+                  {displayCouponFor(selected)}
                 </div>
               </div>
 
-              {/* Shipping */}
               <div className="border rounded-xl p-4">
                 <div className="font-semibold">Delivery details</div>
                 <div className="mt-2 text-sm text-gray-700 space-y-1">
-                  <div>Name: {selected.shipping_name || "—"}</div>
-                  <div>Contact: {selected.shipping_contact || "—"}</div>
+                  <div>Name: {displayNameFor(selected)}</div>
+                  <div>Contact: {displayContactFor(selected)}</div>
                   <div className="whitespace-pre-wrap wrap-break-word">
-                    Address: {selected.shipping_address || "—"}
+                    Address: {displayAddressFor(selected)}
                   </div>
                 </div>
               </div>
 
-              {/* Items */}
               <div className="border rounded-xl p-4">
                 <div className="font-semibold">Items</div>
 
                 {selectedItems.length === 0 ? (
-                  <p className="mt-2 text-sm text-gray-600">No items saved for this order yet.</p>
+                  <p className="mt-2 text-sm text-gray-600">
+                    No items saved for this order yet.
+                  </p>
                 ) : (
                   <div className="mt-3 space-y-2">
                     {selectedItems.map((it, idx) => (
@@ -261,11 +314,14 @@ export default function Orders() {
                         className="flex items-start justify-between gap-3 border rounded-lg p-3"
                       >
                         <div className="min-w-0">
-                          <div className="font-semibold truncate">{it.name || "Item"}</div>
+                          <div className="font-semibold truncate">
+                            {it.name || "Item"}
+                          </div>
                           <div className="text-sm text-gray-600">
                             Qty: {Number(it.qty || 0)} • {money(it.price)}
                           </div>
                         </div>
+
                         <div className="font-semibold shrink-0">
                           {money(Number(it.price || 0) * Number(it.qty || 0))}
                         </div>

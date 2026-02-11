@@ -5,40 +5,69 @@ import { supabase } from "../supabaseClient";
 export default function Checkout() {
   const { id } = useParams();
   const navigate = useNavigate();
+
   const [product, setProduct] = useState(null);
   const [qty, setQty] = useState(1);
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    async function load() {
-      setMsg("");
-      const { data, error } = await supabase
-        .from("products")
-        .select("*")
-        .eq("id", id)
-        .single();
+  async function loadProduct() {
+    setMsg("");
+    const { data, error } = await supabase
+      .from("products")
+      .select("*")
+      .eq("id", Number(id))
+      .single();
 
-      if (error) setMsg(error.message);
-      setProduct(data);
+    if (error) {
+      setProduct(null);
+      setMsg(error.message);
+      return;
     }
-    load();
+
+    setProduct(data);
+    const s = Number(data?.stock || 0);
+    setQty((q) => Math.min(Math.max(1, Number(q || 1)), Math.max(1, s)));
+  }
+
+  useEffect(() => {
+    if (!id) {
+      setMsg("Missing product id in URL. Route must be /checkout/:id");
+      return;
+    }
+    loadProduct();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   async function placeOrder() {
     setMsg("");
     setBusy(true);
 
-    const { error } = await supabase.rpc("create_order", {
-      p_product_id: Number(id),
-      p_qty: Number(qty),
-    });
+    try {
+      if (!product) throw new Error("Product not loaded.");
 
-    setBusy(false);
+      const q = Math.max(1, Number(qty || 1));
+      const currentStock = Number(product.stock || 0);
 
-    if (error) return setMsg(error.message);
+      if (q > currentStock) throw new Error("Not enough stock.");
 
-    navigate("/orders");
+      // ✅ Single RPC: decrements stock + creates order + inserts order_items (server-side)
+      // NOTE: This requires you already created the SQL function `purchase_product`
+      const { error: rpcErr } = await supabase.rpc("purchase_product", {
+        p_product_id: Number(id),
+        p_qty: Number(q),
+      });
+      if (rpcErr) throw rpcErr;
+
+      // refresh UI stock
+      await loadProduct();
+
+      navigate("/orders");
+    } catch (err) {
+      setMsg(err?.message || "Failed to place order.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -48,18 +77,27 @@ export default function Checkout() {
         Confirm quantity, then place order.
       </p>
 
-      {msg && <p className="mt-4 text-red-600">{msg}</p>}
+      {msg && (
+        <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-700 text-sm">
+          {msg}
+        </div>
+      )}
+
       {!product && !msg && <p className="mt-6 text-gray-600">Loading…</p>}
 
       {product && (
-        <div className="mt-6 max-w-lg border rounded-xl p-6 space-y-3">
+        <div className="mt-6 max-w-lg border rounded-xl p-6 space-y-3 bg-white">
           <div className="text-xs text-gray-500">{product.category}</div>
           <div className="text-lg font-semibold">{product.name}</div>
           <div className="text-sm text-gray-600">{product.description || "—"}</div>
 
           <div className="flex items-center justify-between pt-2">
-            <div className="font-bold">₱{Number(product.price || 0).toFixed(2)}</div>
-            <div className="text-sm text-gray-500">Stock: {product.stock ?? 0}</div>
+            <div className="font-bold">
+              ₱{Number(product.price || 0).toFixed(2)}
+            </div>
+            <div className="text-sm text-gray-500">
+              Stock: {product.stock ?? 0}
+            </div>
           </div>
 
           <div className="flex items-center gap-3">

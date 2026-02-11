@@ -1,12 +1,23 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "../supabaseClient";
 
+const NEW_ARRIVALS_LIMIT = 8;
+const PRODUCT_IMG_BUCKET = "product-images";
+
+function money(n) {
+  return `₱${Number(n || 0).toFixed(2)}`;
+}
+
+function safeLower(x) {
+  return String(x || "").toLowerCase();
+}
+
 function makeFileName(file) {
   const ext = (file?.name || "png").split(".").pop();
-  const id = (
-    globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`
-  ).replace(/\./g, "");
+  const id =
+    globalThis.crypto?.randomUUID?.() ||
+    `${Date.now()}-${Math.random()}`.replace(/\./g, "");
   return `${id}.${ext}`;
 }
 
@@ -17,126 +28,104 @@ async function uploadProductImage(file) {
   const filePath = `products/${fileName}`;
 
   const { error: uploadError } = await supabase.storage
-    .from("product-images")
+    .from(PRODUCT_IMG_BUCKET)
     .upload(filePath, file, { upsert: false });
 
   if (uploadError) throw uploadError;
 
-  const { data } = supabase.storage.from("product-images").getPublicUrl(filePath);
+  const { data } = supabase.storage.from(PRODUCT_IMG_BUCKET).getPublicUrl(filePath);
   return data?.publicUrl || null;
 }
 
-function NewArrivalCard({
+function ProductCard({
   product,
   session,
   isAdmin,
   onAdd,
   onUpdateImage,
   savingImage,
-  msg,
-  err,
 }) {
-  const priceText =
-    typeof product?.price === "number"
-      ? `₱${product.price.toFixed(2)}`
-      : product?.price
-        ? `₱${product.price}`
-        : "—";
+  const inStock = Number(product?.stock || 0) > 0;
 
   return (
-    <div className="mt-10 bg-white rounded-2xl shadow-sm border overflow-hidden">
-      <div className="grid grid-cols-1 md:grid-cols-[280px_1fr]">
-        {/* Hero Image */}
-        <div className="relative bg-gray-100 p-6 flex items-center justify-center">
-          {/* Status Badge */}
-          <span className="absolute top-4 left-4 px-3 py-1 text-xs font-semibold rounded-full bg-orange-400 text-white">
-            NEW ARRIVAL!
-          </span>
+    <div className="w-full bg-white rounded-2xl border shadow-sm overflow-hidden flex flex-col">
+      <div className="relative bg-gray-100 h-44 overflow-hidden">
+        <span className="absolute top-3 left-3 px-3 py-1 text-xs font-semibold rounded-full bg-orange-400 text-white">
+          NEW
+        </span>
 
-          {/* Admin: Edit image */}
-          {session && isAdmin && (
-            <label className="absolute top-4 right-4 cursor-pointer">
-              <input
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => onUpdateImage(e.target.files?.[0] || null)}
-              />
-              <span className="px-3 py-1 text-xs font-semibold rounded-full bg-black text-white hover:opacity-90">
-                {savingImage ? "Uploading…" : "Edit image"}
-              </span>
-            </label>
-          )}
+        {session && isAdmin && (
+          <label className="absolute top-3 right-3 cursor-pointer">
+            <input
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => onUpdateImage(product?.id, e.target.files?.[0] || null)}
+              disabled={savingImage}
+            />
+            <span className="px-3 py-1 text-xs font-semibold rounded-full bg-black text-white hover:opacity-90">
+              {savingImage ? "Uploading…" : "Edit image"}
+            </span>
+          </label>
+        )}
 
-          {/* Image */}
-          <div className="w-full h-44 rounded-xl bg-white border overflow-hidden flex items-center justify-center">
-            {product?.image_url ? (
-              <img
-                src={product.image_url}
-                alt={product?.name || "Product"}
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              <span className="text-sm text-gray-500">No image yet</span>
-            )}
+        {product?.image_url ? (
+          <img
+            src={product.image_url}
+            alt={product?.name || "Product"}
+            className="w-full h-full object-cover"
+          />
+        ) : (
+          <div className="h-full w-full flex items-center justify-center text-sm text-gray-500">
+            No image
           </div>
+        )}
+      </div>
 
-          {/* Messages */}
-          {(msg || err) && (
-            <div className="absolute bottom-4 left-4 right-4">
-              {msg && (
-                <div className="text-xs bg-green-50 border border-green-200 text-green-800 rounded-lg px-3 py-2">
-                  {msg}
-                </div>
-              )}
-              {err && (
-                <div className="text-xs bg-red-50 border border-red-200 text-red-800 rounded-lg px-3 py-2 mt-2">
-                  {err}
-                </div>
-              )}
-            </div>
+      <div className="p-4 flex flex-col flex-1">
+        <div className="min-w-0">
+          <h3 className="font-bold text-[#0A2540] leading-tight truncate">
+            {product?.name || "Untitled"}
+          </h3>
+          <p className="mt-1 text-xs text-gray-600 truncate">
+            {product?.category || "Uncategorized"}
+          </p>
+
+          {product?.description ? (
+            <p className="mt-2 text-sm text-gray-700 line-clamp-3">
+              {product.description}
+            </p>
+          ) : (
+            <p className="mt-2 text-sm text-gray-500 line-clamp-3">
+              No description yet.
+            </p>
           )}
         </div>
 
-        {/* Product Info */}
-        <div className="p-6 flex flex-col justify-between">
-          <div>
-            <h3 className="text-xl font-bold tracking-tight text-[#0A2540]">
-              {product?.name || "New Arrival"}
-            </h3>
-
-            <p className="mt-2 text-sm text-gray-600">
-              {product?.description || "Check out our latest product."}
-            </p>
-
-            <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">
-              {/* Stock */}
-              <div
-                className={`flex items-center gap-2 ${
-                  Number(product?.stock) > 0 ? "text-green-700" : "text-gray-500"
-                }`}
-              >
-                <span className="text-base">🛒</span>
-                <span className="text-sm font-medium">
-                  {Number(product?.stock) > 0 ? "In Stock" : "Out of Stock"}
-                </span>
-              </div>
-            </div>
+        <div className="mt-3 flex items-center justify-between text-sm">
+          <div
+            className={`flex items-center gap-2 ${
+              inStock ? "text-green-700" : "text-gray-500"
+            }`}
+          >
+            <span className="text-base">🛒</span>
+            <span className="font-medium">{inStock ? "In Stock" : "Out of Stock"}</span>
           </div>
+          <div className="text-gray-600">Stock: {Number(product?.stock || 0)}</div>
+        </div>
 
-          {/* Price + Add */}
-          <div className="mt-6 flex items-center justify-end gap-3">
-            <div className="text-lg font-bold text-black">{priceText}</div>
-            <button
-              onClick={onAdd}
-              disabled={!product || Number(product?.stock) <= 0}
-              className="w-10 h-10 rounded-full bg-orange-400 text-white flex items-center justify-center text-xl font-bold hover:opacity-90 disabled:opacity-50"
-              aria-label="Add to cart"
-              title="Add to cart"
-            >
-              +
-            </button>
-          </div>
+        {/* Pin actions to bottom */}
+        <div className="mt-auto pt-4 flex items-center justify-between gap-3">
+          <div className="text-lg font-bold text-black">{money(product?.price)}</div>
+          <button
+            onClick={() => onAdd(product)}
+            disabled={!inStock}
+            className="w-10 h-10 rounded-full bg-orange-400 text-white flex items-center justify-center text-xl font-bold hover:opacity-90 disabled:opacity-50"
+            aria-label={`Add ${product?.name || "product"} to cart`}
+            title="Add to cart"
+          >
+            +
+          </button>
         </div>
       </div>
     </div>
@@ -145,61 +134,25 @@ function NewArrivalCard({
 
 export default function Home({ session, fullName }) {
   const navigate = useNavigate();
+  const isMountedRef = useRef(true);
 
-  const displayName =
-    (fullName || "").trim() ||
-    session?.user?.email?.split("@")?.[0] ||
-    "User";
-
-  const [featured, setFeatured] = useState(null);
-  const [loadingFeatured, setLoadingFeatured] = useState(true);
-
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [savingImage, setSavingImage] = useState(false);
-  const [msg, setMsg] = useState("");
-  const [err, setErr] = useState("");
-
-  async function loadFeatured() {
-    setLoadingFeatured(true);
-    setErr("");
-
-    // ✅ latest product becomes New Arrival
-    const { data, error } = await supabase
-      .from("products")
-      .select("id, name, description, price, category, stock, image_url")
-      .order("id", { ascending: false })
-      .limit(1);
-
-    if (error) {
-      console.error("Home featured product error:", error);
-      setErr(error.message);
-      setFeatured(null);
-    } else {
-      setFeatured((data && data[0]) || null);
-    }
-
-    setLoadingFeatured(false);
-  }
-
-  // Load featured on mount + when tab refocuses (so new admin uploads show up)
   useEffect(() => {
-    loadFeatured();
-
-    const onFocus = () => loadFeatured();
-    window.addEventListener("focus", onFocus);
-
-    const onVis = () => {
-      if (document.visibilityState === "visible") loadFeatured();
-    };
-    document.addEventListener("visibilitychange", onVis);
-
     return () => {
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onVis);
+      isMountedRef.current = false;
     };
   }, []);
 
-  // Check admin role
+  const displayName =
+    (fullName || "").trim() || session?.user?.email?.split("@")?.[0] || "User";
+
+  const [newArrivals, setNewArrivals] = useState([]);
+  const [loadingArrivals, setLoadingArrivals] = useState(true);
+  const [arrivalsErr, setArrivalsErr] = useState("");
+
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [savingImageId, setSavingImageId] = useState(null);
+
+  // Admin check (uses profiles.role per your schema)
   useEffect(() => {
     let alive = true;
 
@@ -216,13 +169,11 @@ export default function Home({ session, fullName }) {
       if (!alive) return;
 
       if (error) {
-        console.error("Home admin check error:", error);
         setIsAdmin(false);
         return;
       }
 
-      const role = String(profile?.role || "").trim().toLowerCase();
-      setIsAdmin(role === "admin");
+      setIsAdmin(safeLower(profile?.role) === "admin");
     }
 
     checkAdmin();
@@ -231,21 +182,104 @@ export default function Home({ session, fullName }) {
     };
   }, [session?.user?.id]);
 
-  function addFeaturedToCart() {
+  async function fetchNewArrivals() {
+    if (isMountedRef.current) {
+      setLoadingArrivals(true);
+      setArrivalsErr("");
+    }
+
+    const timeoutMs = 15000;
+    const timeout = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Request timeout")), timeoutMs)
+    );
+
+    try {
+      // Attempt 1: order by created_at DESC (best if column exists)
+      const q1 = supabase
+        .from("products")
+        .select("id, name, description, price, category, stock, image_url, created_at")
+        .order("created_at", { ascending: false })
+        .limit(NEW_ARRIVALS_LIMIT);
+
+      let res;
+      try {
+        res = await Promise.race([q1, timeout]);
+      } catch (e) {
+        // timeout will be caught below; keep structure consistent
+        throw e;
+      }
+
+      // If created_at ordering fails (column missing), fall back to id DESC
+      if (res?.error && /created_at/i.test(res.error.message)) {
+        const q2 = supabase
+          .from("products")
+          .select("id, name, description, price, category, stock, image_url")
+          .order("id", { ascending: false })
+          .limit(NEW_ARRIVALS_LIMIT);
+
+        const res2 = await Promise.race([q2, timeout]);
+        if (!isMountedRef.current) return;
+
+        if (res2?.error) {
+          setArrivalsErr(res2.error.message || "Failed to load new arrivals.");
+          setNewArrivals([]);
+        } else {
+          setNewArrivals(Array.isArray(res2.data) ? res2.data : []);
+        }
+        return;
+      }
+
+      if (!isMountedRef.current) return;
+
+      if (res?.error) {
+        setArrivalsErr(res.error.message || "Failed to load new arrivals.");
+        setNewArrivals([]);
+      } else {
+        setNewArrivals(Array.isArray(res.data) ? res.data : []);
+      }
+    } catch (e) {
+      if (!isMountedRef.current) return;
+      setArrivalsErr(e?.message || "Failed to load new arrivals.");
+      setNewArrivals([]);
+    } finally {
+      if (isMountedRef.current) setLoadingArrivals(false);
+    }
+  }
+
+  useEffect(() => {
+    fetchNewArrivals();
+
+    // Refresh when tab focuses so newly added admin products show quickly
+    const onFocus = () => fetchNewArrivals();
+    window.addEventListener("focus", onFocus);
+
+    const onVis = () => {
+      if (document.visibilityState === "visible") fetchNewArrivals();
+    };
+    document.addEventListener("visibilitychange", onVis);
+
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function addToCart(product) {
     if (!session) {
       navigate("/login");
       return;
     }
-    if (!featured) return;
+    if (!product?.id) return;
 
     const cart = JSON.parse(localStorage.getItem("cart") || "[]");
 
     const item = {
-      product_id: featured.id,
-      name: featured.name,
-      price: Number(featured.price) || 0,
+      product_id: product.id,
+      name: product.name,
+      price: Number(product.price) || 0,
       qty: 1,
-      image_url: featured.image_url || null,
+      image_url: product.image_url || null,
     };
 
     const idx = cart.findIndex((x) => x.product_id === item.product_id);
@@ -256,41 +290,35 @@ export default function Home({ session, fullName }) {
     navigate("/cart");
   }
 
-  async function handleUpdateImage(file) {
-    setMsg("");
-    setErr("");
-
-    if (!file) return;
-    if (!featured?.id) {
-      setErr("No featured product found.");
-      return;
-    }
+  async function handleUpdateImage(productId, file) {
+    if (!file || !productId) return;
 
     try {
-      setSavingImage(true);
+      setSavingImageId(productId);
 
       const url = await uploadProductImage(file);
 
       const { error } = await supabase
         .from("products")
         .update({ image_url: url })
-        .eq("id", featured.id);
+        .eq("id", productId);
 
       if (error) {
-        console.error("Update product image error:", error);
-        setErr(error.message);
+        setArrivalsErr(error.message);
         return;
       }
 
-      setFeatured((prev) => (prev ? { ...prev, image_url: url } : prev));
-      setMsg("Image updated ✅");
+      setNewArrivals((prev) =>
+        prev.map((p) => (p.id === productId ? { ...p, image_url: url } : p))
+      );
     } catch (e) {
-      console.error(e);
-      setErr(e?.message || "Upload failed.");
+      setArrivalsErr(e?.message || "Upload failed.");
     } finally {
-      setSavingImage(false);
+      setSavingImageId(null);
     }
   }
+
+  const hasArrivals = useMemo(() => newArrivals && newArrivals.length > 0, [newArrivals]);
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-12">
@@ -298,31 +326,19 @@ export default function Home({ session, fullName }) {
         {session ? `Welcome, ${displayName}.` : "The smart way to shop for school."}
       </h1>
 
-      <p className="mt-3 text-gray-600 max-w-xl">
-        Adriano Store helps you find notebooks, writing tools, accessories, and
-        paintings with a clean checkout flow.
+      <p className="mt-2 text-gray-600">
+        Browse the latest arrivals and essentials for your studies.
       </p>
 
-      {/* ✅ Home stays clean: just browse + login */}
-      <div className="mt-6 flex gap-3">
-        <Link
-          to="/products"
-          className="px-4 py-2 rounded-lg bg-black text-white hover:opacity-90"
-        >
-          Browse products
+      <div className="mt-8 flex flex-wrap gap-3">
+        <Link to="/products" className="px-4 py-2 rounded-xl bg-black text-white hover:opacity-90">
+          Shop all products
         </Link>
-
-        {!session && (
-          <Link
-            to="/login"
-            className="px-4 py-2 rounded-lg border hover:bg-gray-50"
-          >
-            Log in
-          </Link>
-        )}
+        <Link to="/cart" className="px-4 py-2 rounded-xl border bg-white hover:bg-gray-50">
+          View cart
+        </Link>
       </div>
 
-      {/* Categories -> Products with ?cat= */}
       <section className="mt-10 grid grid-cols-1 sm:grid-cols-4 gap-4">
         {[
           { title: "Notebooks", text: "A5/A4, ruled/plain" },
@@ -341,23 +357,52 @@ export default function Home({ session, fullName }) {
         ))}
       </section>
 
-      {/* New Arrival (latest product from DB) */}
-      {loadingFeatured ? (
-        <div className="mt-10 border rounded-2xl p-6 bg-white text-gray-600">
-          Loading new arrival…
+      {/* NEW ARRIVALS */}
+      <section className="mt-10">
+        <div className="flex items-end justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-bold text-[#0A2540]">New Arrivals</h2>
+            <p className="text-sm text-gray-600">Latest products added by the admin.</p>
+          </div>
+
+          <button
+            type="button"
+            onClick={fetchNewArrivals}
+            className="px-4 py-2 rounded-xl border bg-white hover:bg-gray-50"
+          >
+            Refresh
+          </button>
         </div>
-      ) : (
-        <NewArrivalCard
-          product={featured}
-          session={session}
-          isAdmin={isAdmin}
-          onAdd={addFeaturedToCart}
-          onUpdateImage={handleUpdateImage}
-          savingImage={savingImage}
-          msg={msg}
-          err={err}
-        />
-      )}
+
+        {loadingArrivals ? (
+          <div className="mt-4 border rounded-2xl p-6 bg-white text-gray-600">
+            Loading new arrivals…
+          </div>
+        ) : arrivalsErr ? (
+          <div className="mt-4 border rounded-2xl p-6 bg-white">
+            <div className="text-sm text-red-700 font-semibold">Couldn’t load products</div>
+            <div className="text-sm text-red-600 mt-1">{arrivalsErr}</div>
+          </div>
+        ) : !hasArrivals ? (
+          <div className="mt-4 border rounded-2xl p-6 bg-white text-gray-600">
+            No new arrivals yet.
+          </div>
+        ) : (
+          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-stretch">
+            {newArrivals.map((p) => (
+              <ProductCard
+                key={p.id}
+                product={p}
+                session={session}
+                isAdmin={isAdmin}
+                onAdd={addToCart}
+                onUpdateImage={handleUpdateImage}
+                savingImage={savingImageId === p.id}
+              />
+            ))}
+          </div>
+        )}
+      </section>
     </main>
   );
 }

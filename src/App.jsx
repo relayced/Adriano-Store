@@ -4,6 +4,7 @@ import { supabase } from "./supabaseClient";
 
 import Navbar from "./components/Navbar";
 
+import Checkout from "./pages/Checkout";
 import Home from "./pages/Home";
 import Products from "./pages/Products";
 import Cart from "./pages/Cart";
@@ -12,11 +13,36 @@ import Profile from "./pages/Profile";
 import Admin from "./pages/Admin";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
+import SpecialOffers from "./pages/SpecialOffers";
 
-function withTimeout(promise, ms = 6000) {
+/**
+ * Safer timeout helper:
+ * - For Supabase PostgREST builders, we can abort using .abortSignal(signal).
+ * - For plain promises, we just race with a timer.
+ */
+function withTimeoutAbort(builderOrPromise, ms = 12000) {
+  // If it looks like a Postgrest builder (has abortSignal), use AbortController
+  if (builderOrPromise && typeof builderOrPromise.abortSignal === "function") {
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), ms);
+
+    return builderOrPromise
+      .abortSignal(controller.signal)
+      .then((res) => res)
+      .catch((err) => {
+        // Normalize abort error message
+        if (err?.name === "AbortError") throw new Error("Request timeout");
+        throw err;
+      })
+      .finally(() => clearTimeout(t));
+  }
+
+  // Fallback: plain promise timeout race
   return Promise.race([
-    promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error("Request timeout")), ms)),
+    builderOrPromise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Request timeout")), ms)
+    ),
   ]);
 }
 
@@ -32,7 +58,8 @@ export default function App() {
     async function init() {
       setLoadingProfile(true);
       try {
-        const { data } = await withTimeout(supabase.auth.getSession(), 6000);
+        // getSession usually returns fast; keep a generous timeout
+        const { data } = await withTimeoutAbort(supabase.auth.getSession(), 30000);
         if (!alive) return;
 
         const s = data?.session ?? null;
@@ -48,7 +75,6 @@ export default function App() {
       } catch (e) {
         console.error("init error:", e);
         if (!alive) return;
-        // don’t freeze app
         setSession(null);
         setRole("user");
         setFullName("");
@@ -81,17 +107,18 @@ export default function App() {
   }, []);
 
   async function loadProfile(userId) {
+    setLoadingProfile(true);
     try {
-      const { data, error } = await withTimeout(
+      // ✅ Abortable timeout (prevents “hang forever”)
+      const { data, error } = await withTimeoutAbort(
         supabase.from("profiles").select("role, full_name").eq("id", userId).maybeSingle(),
-        6000
+        12000
       );
 
       if (error) {
         console.error("loadProfile error:", error);
         setRole("user");
         setFullName("");
-        setLoadingProfile(false);
         return;
       }
 
@@ -99,18 +126,17 @@ export default function App() {
         console.warn("No profile row for:", userId);
         setRole("user");
         setFullName("");
-        setLoadingProfile(false);
         return;
       }
 
       const normalizedRole = String(data.role ?? "user").trim().toLowerCase();
       setRole(normalizedRole);
       setFullName(data.full_name ?? "");
-      setLoadingProfile(false);
     } catch (e) {
       console.error("loadProfile timeout/crash:", e);
       setRole("user");
       setFullName("");
+    } finally {
       setLoadingProfile(false);
     }
   }
@@ -131,6 +157,8 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Home session={session} />} />
         <Route path="/products" element={<Products session={session} />} />
+        <Route path="/offers" element={<SpecialOffers />} />
+        <Route path="/checkout/:id" element={<Checkout />} />
 
         <Route path="/login" element={!session ? <Login /> : <Navigate to="/" replace />} />
         <Route path="/signup" element={!session ? <Signup /> : <Navigate to="/" replace />} />
