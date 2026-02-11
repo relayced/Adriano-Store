@@ -132,7 +132,7 @@ function ProductCard({
   );
 }
 
-export default function Home({ session, fullName }) {
+export default function Home({ session, fullName, role }) {
   const navigate = useNavigate();
   const isMountedRef = useRef(true);
 
@@ -152,9 +152,16 @@ export default function Home({ session, fullName }) {
   const [isAdmin, setIsAdmin] = useState(false);
   const [savingImageId, setSavingImageId] = useState(null);
 
-  // Admin check (uses profiles.role per your schema)
+  // Admin check: prefer role passed from App to avoid duplicate DB queries
   useEffect(() => {
     let alive = true;
+
+    if (role != null) {
+      setIsAdmin(safeLower(role) === "admin");
+      return () => {
+        alive = false;
+      };
+    }
 
     async function checkAdmin() {
       setIsAdmin(false);
@@ -180,7 +187,7 @@ export default function Home({ session, fullName }) {
     return () => {
       alive = false;
     };
-  }, [session?.user?.id]);
+  }, [session?.user?.id, role]);
 
   async function fetchNewArrivals() {
     if (isMountedRef.current) {

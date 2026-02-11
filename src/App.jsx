@@ -155,8 +155,8 @@ export default function App() {
       )}
 
       <Routes>
-        <Route path="/" element={<Home session={session} />} />
-        <Route path="/products" element={<Products session={session} />} />
+        <Route path="/" element={<Home session={session} role={role} />} />
+        <Route path="/products" element={<Products session={session} role={role} />} />
         <Route path="/offers" element={<SpecialOffers />} />
         <Route path="/checkout/:id" element={<Checkout />} />
 
