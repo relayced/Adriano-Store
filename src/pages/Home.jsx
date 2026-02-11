@@ -84,37 +84,24 @@ function ProductCard({
 
       <div className="p-4 flex flex-col flex-1">
         <div className="min-w-0">
-          <h3 className="font-bold text-[#0A2540] leading-tight truncate">
-            {product?.name || "Untitled"}
-          </h3>
-          <p className="mt-1 text-xs text-gray-600 truncate">
-            {product?.category || "Uncategorized"}
-          </p>
+          <h3 className="font-bold text-[#0A2540] leading-tight truncate">{product?.name || "Untitled"}</h3>
+          <p className="mt-1 text-xs text-gray-600 truncate">{product?.category || "Uncategorized"}</p>
 
           {product?.description ? (
-            <p className="mt-2 text-sm text-gray-700 line-clamp-3">
-              {product.description}
-            </p>
+            <p className="mt-2 text-sm text-gray-700 line-clamp-3">{product.description}</p>
           ) : (
-            <p className="mt-2 text-sm text-gray-500 line-clamp-3">
-              No description yet.
-            </p>
+            <p className="mt-2 text-sm text-gray-500 line-clamp-3">No description yet.</p>
           )}
         </div>
 
         <div className="mt-3 flex items-center justify-between text-sm">
-          <div
-            className={`flex items-center gap-2 ${
-              inStock ? "text-green-700" : "text-gray-500"
-            }`}
-          >
+          <div className={`flex items-center gap-2 ${inStock ? "text-green-700" : "text-gray-500"}`}>
             <span className="text-base">🛒</span>
             <span className="font-medium">{inStock ? "In Stock" : "Out of Stock"}</span>
           </div>
           <div className="text-gray-600">Stock: {Number(product?.stock || 0)}</div>
         </div>
 
-        {/* Pin actions to bottom */}
         <div className="mt-auto pt-4 flex items-center justify-between gap-3">
           <div className="text-lg font-bold text-black">{money(product?.price)}</div>
           <button
@@ -142,12 +129,16 @@ export default function Home({ session, fullName, role }) {
     };
   }, []);
 
-  const displayName =
-    (fullName || "").trim() || session?.user?.email?.split("@")?.[0] || "User";
+  const displayName = (fullName || "").trim() || session?.user?.email?.split("@")?.[0] || "User";
 
   const [newArrivals, setNewArrivals] = useState([]);
   const [loadingArrivals, setLoadingArrivals] = useState(true);
   const [arrivalsErr, setArrivalsErr] = useState("");
+
+  // timestamp (ms) of last successful arrivals fetch
+  const lastFetchRef = useRef(0);
+  // prevent concurrent fetches
+  const fetchInProgressRef = useRef(false);
 
   const [isAdmin, setIsAdmin] = useState(false);
   const [savingImageId, setSavingImageId] = useState(null);
@@ -167,11 +158,7 @@ export default function Home({ session, fullName, role }) {
       setIsAdmin(false);
       if (!session?.user?.id) return;
 
-      const { data: profile, error } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("id", session.user.id)
-        .maybeSingle();
+      const { data: profile, error } = await supabase.from("profiles").select("role").eq("id", session.user.id).maybeSingle();
 
       if (!alive) return;
 
@@ -189,16 +176,27 @@ export default function Home({ session, fullName, role }) {
     };
   }, [session?.user?.id, role]);
 
-  async function fetchNewArrivals() {
-    if (isMountedRef.current) {
-      setLoadingArrivals(true);
-      setArrivalsErr("");
+  async function fetchNewArrivals(force = false) {
+    // avoid concurrent fetches
+    if (fetchInProgressRef.current) return;
+
+    // If data is fresh and not forced, skip fetching
+    const FRESH_MS = 60 * 1000; // 60s
+    if (!force && lastFetchRef.current && Date.now() - lastFetchRef.current < FRESH_MS) {
+      return;
     }
 
+    // only show loading indicator if forcing or we have no data yet
+    if (isMountedRef.current) {
+      if (force || !newArrivals || newArrivals.length === 0) {
+        setLoadingArrivals(true);
+      }
+      setArrivalsErr("");
+    }
+    fetchInProgressRef.current = true;
+
     const timeoutMs = 15000;
-    const timeout = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error("Request timeout")), timeoutMs)
-    );
+    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("Request timeout")), timeoutMs));
 
     try {
       // Attempt 1: order by created_at DESC (best if column exists)
@@ -212,7 +210,6 @@ export default function Home({ session, fullName, role }) {
       try {
         res = await Promise.race([q1, timeout]);
       } catch (e) {
-        // timeout will be caught below; keep structure consistent
         throw e;
       }
 
@@ -232,7 +229,10 @@ export default function Home({ session, fullName, role }) {
           setNewArrivals([]);
         } else {
           setNewArrivals(Array.isArray(res2.data) ? res2.data : []);
+          lastFetchRef.current = Date.now();
         }
+        fetchInProgressRef.current = false;
+        if (isMountedRef.current) setLoadingArrivals(false);
         return;
       }
 
@@ -243,26 +243,29 @@ export default function Home({ session, fullName, role }) {
         setNewArrivals([]);
       } else {
         setNewArrivals(Array.isArray(res.data) ? res.data : []);
+        lastFetchRef.current = Date.now();
       }
     } catch (e) {
       if (!isMountedRef.current) return;
       setArrivalsErr(e?.message || "Failed to load new arrivals.");
       setNewArrivals([]);
     } finally {
+      fetchInProgressRef.current = false;
       if (isMountedRef.current) setLoadingArrivals(false);
     }
   }
 
   useEffect(() => {
+    // initial load
     fetchNewArrivals();
 
-    // Refresh when tab focuses so newly added admin products show quickly
-    const onFocus = () => fetchNewArrivals();
-    window.addEventListener("focus", onFocus);
+    // Refresh when tab focuses — but only if data is stale (fetchNewArrivals handles freshness)
+    const onFocus = () => fetchNewArrivals(false);
 
     const onVis = () => {
-      if (document.visibilityState === "visible") fetchNewArrivals();
+      if (document.visibilityState === "visible") fetchNewArrivals(false);
     };
+    window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVis);
 
     return () => {
@@ -305,19 +308,14 @@ export default function Home({ session, fullName, role }) {
 
       const url = await uploadProductImage(file);
 
-      const { error } = await supabase
-        .from("products")
-        .update({ image_url: url })
-        .eq("id", productId);
+      const { error } = await supabase.from("products").update({ image_url: url }).eq("id", productId);
 
       if (error) {
         setArrivalsErr(error.message);
         return;
       }
 
-      setNewArrivals((prev) =>
-        prev.map((p) => (p.id === productId ? { ...p, image_url: url } : p))
-      );
+      setNewArrivals((prev) => prev.map((p) => (p.id === productId ? { ...p, image_url: url } : p)));
     } catch (e) {
       setArrivalsErr(e?.message || "Upload failed.");
     } finally {
@@ -329,21 +327,13 @@ export default function Home({ session, fullName, role }) {
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-12">
-      <h1 className="text-3xl font-bold tracking-tight">
-        {session ? `Welcome, ${displayName}.` : "The smart way to shop for school."}
-      </h1>
+      <h1 className="text-3xl font-bold tracking-tight">{session ? `Welcome, ${displayName}.` : "The smart way to shop for school."}</h1>
 
-      <p className="mt-2 text-gray-600">
-        Browse the latest arrivals and essentials for your studies.
-      </p>
+      <p className="mt-2 text-gray-600">Browse the latest arrivals and essentials for your studies.</p>
 
       <div className="mt-8 flex flex-wrap gap-3">
-        <Link to="/products" className="px-4 py-2 rounded-xl bg-black text-white hover:opacity-90">
-          Shop all products
-        </Link>
-        <Link to="/cart" className="px-4 py-2 rounded-xl border bg-white hover:bg-gray-50">
-          View cart
-        </Link>
+        <Link to="/products" className="px-4 py-2 rounded-xl bg-black text-white hover:opacity-90">Shop all products</Link>
+        <Link to="/cart" className="px-4 py-2 rounded-xl border bg-white hover:bg-gray-50">View cart</Link>
       </div>
 
       <section className="mt-10 grid grid-cols-1 sm:grid-cols-4 gap-4">
@@ -353,11 +343,7 @@ export default function Home({ session, fullName, role }) {
           { title: "Accessories", text: "Erasers, rulers, bags" },
           { title: "Paintings", text: "Art supplies & works" },
         ].map((x) => (
-          <Link
-            key={x.title}
-            to={`/products?cat=${encodeURIComponent(x.title)}`}
-            className="border rounded-xl p-4 hover:bg-gray-50 transition block"
-          >
+          <Link key={x.title} to={`/products?cat=${encodeURIComponent(x.title)}`} className="border rounded-xl p-4 hover:bg-gray-50 transition block">
             <div className="font-semibold">{x.title}</div>
             <div className="text-sm text-gray-600 mt-1">{x.text}</div>
           </Link>
@@ -372,28 +358,20 @@ export default function Home({ session, fullName, role }) {
             <p className="text-sm text-gray-600">Latest products added by the admin.</p>
           </div>
 
-          <button
-            type="button"
-            onClick={fetchNewArrivals}
-            className="px-4 py-2 rounded-xl border bg-white hover:bg-gray-50"
-          >
+          <button type="button" onClick={() => fetchNewArrivals(true)} className="px-4 py-2 rounded-xl border bg-white hover:bg-gray-50">
             Refresh
           </button>
         </div>
 
         {loadingArrivals ? (
-          <div className="mt-4 border rounded-2xl p-6 bg-white text-gray-600">
-            Loading new arrivals…
-          </div>
+          <div className="mt-4 border rounded-2xl p-6 bg-white text-gray-600">Loading new arrivals…</div>
         ) : arrivalsErr ? (
           <div className="mt-4 border rounded-2xl p-6 bg-white">
             <div className="text-sm text-red-700 font-semibold">Couldn’t load products</div>
             <div className="text-sm text-red-600 mt-1">{arrivalsErr}</div>
           </div>
         ) : !hasArrivals ? (
-          <div className="mt-4 border rounded-2xl p-6 bg-white text-gray-600">
-            No new arrivals yet.
-          </div>
+          <div className="mt-4 border rounded-2xl p-6 bg-white text-gray-600">No new arrivals yet.</div>
         ) : (
           <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-stretch">
             {newArrivals.map((p) => (
