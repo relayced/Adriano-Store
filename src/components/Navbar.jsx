@@ -6,20 +6,20 @@ export default function Navbar({ session }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const linkBase = "px-4 py-2 text-sm font-medium rounded-full transition";
-  const inactive = "text-gray-700 hover:bg-gray-100";
-  const active = "bg-orange-400 text-white";
+  const inactive = "text-emerald-700 hover:bg-emerald-50";
+  const active = "bg-emerald-700 text-white";
 
   const closeMobileMenu = () => setMobileMenuOpen(false);
 
   return (
-    <header className="border-b bg-white">
+    <header className="border-b border-emerald-900/20 bg-gradient-to-r from-emerald-900/5 to-white">
       <div className="mx-auto max-w-6xl px-6 py-4 flex items-center justify-between">
         {/* LEFT: LOGO */}
         <div
-          className="text-xl font-bold tracking-tight text-[#0A2540] cursor-pointer"
+          className="text-2xl font-bold tracking-tight text-emerald-900 cursor-pointer"
           onClick={() => navigate("/")}
         >
-          Adriano Store
+          Adriano
         </div>
 
         {/* CENTER: NAV MENU (Desktop) */}
@@ -35,14 +35,14 @@ export default function Navbar({ session }) {
             to="/products"
             className={({ isActive }) => `${linkBase} ${isActive ? active : inactive}`}
           >
-            Browse Menu
+            Shop
           </NavLink>
 
           <NavLink
             to="/offers"
             className={({ isActive }) => `${linkBase} ${isActive ? active : inactive}`}
           >
-            Special Offers
+            Offers
           </NavLink>
         </nav>
 
@@ -51,17 +51,15 @@ export default function Navbar({ session }) {
           {!session ? (
             <button
               onClick={() => navigate("/login")}
-              className="hidden sm:flex items-center gap-2 px-4 py-2 rounded-full bg-black text-white text-sm hover:opacity-90"
+              className="hidden sm:flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-700 text-white text-sm hover:bg-emerald-800 transition"
             >
-              <span className="w-6 h-6 flex items-center justify-center rounded-full bg-orange-400 text-black text-xs font-bold">
-                👤
-              </span>
-              Login / Signup
+              <span className="text-lg">👤</span>
+              Sign In
             </button>
           ) : (
             <button
               onClick={() => navigate("/profile")}
-              className="hidden sm:block px-4 py-2 rounded-full border text-sm hover:bg-gray-50"
+              className="hidden sm:block px-4 py-2 rounded-full border border-emerald-900/20 text-emerald-700 text-sm hover:bg-emerald-50 transition"
             >
               Profile
             </button>
@@ -73,21 +71,21 @@ export default function Navbar({ session }) {
             className="md:hidden flex flex-col gap-1.5"
             aria-label="Toggle menu"
           >
-            <span className="w-6 h-0.5 bg-gray-800 block"></span>
-            <span className="w-6 h-0.5 bg-gray-800 block"></span>
-            <span className="w-6 h-0.5 bg-gray-800 block"></span>
+            <span className="w-6 h-0.5 bg-emerald-700 block"></span>
+            <span className="w-6 h-0.5 bg-emerald-700 block"></span>
+            <span className="w-6 h-0.5 bg-emerald-700 block"></span>
           </button>
         </div>
       </div>
 
       {/* MOBILE MENU */}
       {mobileMenuOpen && (
-        <nav className="md:hidden border-t bg-white">
+        <nav className="md:hidden border-t border-emerald-900/20 bg-emerald-50/30">
           <div className="mx-auto max-w-6xl px-6 py-4 space-y-2">
             <NavLink
               to="/"
               onClick={closeMobileMenu}
-              className={({ isActive }) => `block px-4 py-2 rounded-lg ${isActive ? "bg-orange-400 text-white" : "text-gray-700 hover:bg-gray-100"}`}
+              className={({ isActive }) => `block px-4 py-2 rounded-lg ${isActive ? "bg-emerald-700 text-white" : "text-emerald-700 hover:bg-emerald-100"}`}
             >
               Home
             </NavLink>
@@ -95,17 +93,17 @@ export default function Navbar({ session }) {
             <NavLink
               to="/products"
               onClick={closeMobileMenu}
-              className={({ isActive }) => `block px-4 py-2 rounded-lg ${isActive ? "bg-orange-400 text-white" : "text-gray-700 hover:bg-gray-100"}`}
+              className={({ isActive }) => `block px-4 py-2 rounded-lg ${isActive ? "bg-emerald-700 text-white" : "text-emerald-700 hover:bg-emerald-100"}`}
             >
-              Browse Menu
+              Shop
             </NavLink>
 
             <NavLink
               to="/offers"
               onClick={closeMobileMenu}
-              className={({ isActive }) => `block px-4 py-2 rounded-lg ${isActive ? "bg-orange-400 text-white" : "text-gray-700 hover:bg-gray-100"}`}
+              className={({ isActive }) => `block px-4 py-2 rounded-lg ${isActive ? "bg-emerald-700 text-white" : "text-emerald-700 hover:bg-emerald-100"}`}
             >
-              Special Offers
+              Offers
             </NavLink>
 
             {!session ? (
@@ -114,12 +112,10 @@ export default function Navbar({ session }) {
                   navigate("/login");
                   closeMobileMenu();
                 }}
-                className="w-full mt-4 flex items-center gap-2 px-4 py-2 rounded-lg bg-black text-white text-sm hover:opacity-90"
+                className="w-full mt-4 flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-700 text-white text-sm hover:bg-emerald-800 transition"
               >
-                <span className="w-6 h-6 flex items-center justify-center rounded-full bg-orange-400 text-black text-xs font-bold">
-                  👤
-                </span>
-                Login / Signup
+                <span className="text-lg">👤</span>
+                Sign In
               </button>
             ) : (
               <button
@@ -127,7 +123,7 @@ export default function Navbar({ session }) {
                   navigate("/profile");
                   closeMobileMenu();
                 }}
-                className="w-full mt-4 px-4 py-2 rounded-lg border text-sm hover:bg-gray-50"
+                className="w-full mt-4 px-4 py-2 rounded-lg border border-emerald-900/20 text-emerald-700 text-sm hover:bg-emerald-100 transition"
               >
                 Profile
               </button>

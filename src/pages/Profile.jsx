@@ -57,13 +57,54 @@ export default function Profile() {
 
       if (!alive) return;
 
-      // If profile doesn't exist yet, keep empty values (your trigger should create it, but this is safe)
-      if (profileErr) {
+      // Handle profile loading
+      if (profileErr && profileErr.code !== "PGRST116") {
+        // PGRST116 means no rows found, which is OK
+        console.error("Profile query error:", profileErr);
         setErr(profileErr.message);
-      } else if (profile) {
+      }
+
+      if (profile) {
+        // Profile exists - use it
         setFullName(profile.full_name ?? "");
         setContactNumber(profile.contact_number ?? "");
         setAddress(profile.address ?? "");
+      } else {
+        // Profile doesn't exist yet - try to create it from auth metadata
+        console.warn("No profile row found, creating from auth metadata...");
+        
+        const metadata = user?.user_metadata || {};
+        const payload = {
+          id: user.id,
+          email: user.email || "",
+          full_name: (metadata.full_name || "").trim(),
+          contact_number: (metadata.contact_number || "").trim(),
+          address: (metadata.address || "").trim(),
+          role: "user",
+        };
+
+        try {
+          const { error: createErr } = await supabase
+            .from("profiles")
+            .upsert(payload, { onConflict: "id" });
+
+          if (!alive) return;
+
+          if (createErr) {
+            console.warn("Could not create profile:", createErr);
+            // Still set the data from metadata so user can see and edit
+          }
+
+          setFullName(payload.full_name);
+          setContactNumber(payload.contact_number);
+          setAddress(payload.address);
+        } catch (e) {
+          console.warn("Profile creation error:", e);
+          // Set from metadata anyway
+          setFullName((metadata.full_name || "").trim());
+          setContactNumber((metadata.contact_number || "").trim());
+          setAddress((metadata.address || "").trim());
+        }
       }
 
       setLoading(false);

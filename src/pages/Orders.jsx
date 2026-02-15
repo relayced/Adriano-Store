@@ -41,15 +41,46 @@ export default function Orders() {
     setLoading(true);
     setErrorMsg("");
 
-    const { data, error } = await supabase
-      .from("orders")
-      .select("*")
-      .eq("user_id", uid)
-      .order("created_at", { ascending: false });
+    try {
+      const timeoutMs = 60000;
+      const timeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Request timeout")), timeoutMs)
+      );
 
-    if (error) setErrorMsg(error.message);
-    setOrders(data || []);
-    setLoading(false);
+      async function callWithRetry(fn, retries = 2, delayMs = 400) {
+        let lastErr;
+        for (let i = 0; i <= retries; i++) {
+          try {
+            return await fn();
+          } catch (err) {
+            lastErr = err;
+            if (i < retries) await new Promise((r) => setTimeout(r, delayMs * (i + 1)));
+          }
+        }
+        throw lastErr;
+      }
+
+      const q = supabase
+        .from("orders")
+        .select("*")
+        .eq("user_id", uid)
+        .order("created_at", { ascending: false });
+
+      const { data, error } = await callWithRetry(
+        () => Promise.race([q, timeout]),
+        2,
+        400
+      );
+
+      if (error) setErrorMsg(error.message);
+      setOrders(data || []);
+    } catch (e) {
+      console.error("loadOrders error:", e);
+      setErrorMsg(e?.message || "Failed to load orders.");
+      setOrders([]);
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {

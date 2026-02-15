@@ -19,51 +19,83 @@ export default function Signup() {
     setMsg("");
     setBusy(true);
 
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          full_name: fullName,
-          contact_number: contactNumber,
-          address: address,
+    try {
+      // Step 1: Create auth user with metadata
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            full_name: fullName,
+            contact_number: contactNumber,
+            address: address,
+          },
         },
-      },
-    });
+      });
 
-    setBusy(false);
+      if (authError) {
+        setMsg(authError.message);
+        setBusy(false);
+        return;
+      }
 
-    if (error) return setMsg(error.message);
+      // Step 2: After user is created, ensure profile exists
+      if (authData?.user?.id) {
+        const { error: profileError } = await supabase
+          .from("profiles")
+          .upsert(
+            {
+              id: authData.user.id,
+              email: email,
+              full_name: fullName.trim(),
+              contact_number: contactNumber.trim(),
+              address: address.trim(),
+              role: "user",
+            },
+            { onConflict: "id" }
+          );
 
-    // If email confirmation is ON, they must verify then log in
-    navigate("/login");
+        if (profileError) {
+          console.warn("Profile creation warning:", profileError);
+          // Don't fail signup if profile creation fails - user can update later
+        }
+      }
+
+      setBusy(false);
+      // If email confirmation is ON, they must verify then log in
+      navigate("/login");
+    } catch (err) {
+      console.error("Signup error:", err);
+      setMsg(err?.message || "An error occurred during signup");
+      setBusy(false);
+    }
   }
 
   return (
     <main className="min-h-screen grid place-items-center px-6 py-10 bg-gray-50">
-      <div className="w-full max-w-4xl overflow-hidden rounded-2xl border bg-white shadow-sm grid grid-cols-1 md:grid-cols-2">
-        <div className="hidden md:block relative">
-          <img src={loginImg} alt="Signup design" className="h-full w-full object-cover" />
-          <div className="absolute inset-0 bg-black/20" />
+      <div className="w-full max-w-4xl overflow-hidden rounded-2xl border border-emerald-900/20 bg-white shadow-md grid grid-cols-1 md:grid-cols-2">
+        <div className="hidden md:block relative bg-emerald-700">
+          <img src={loginImg} alt="Signup design" className="h-full w-full object-cover opacity-80" />
+          <div className="absolute inset-0 bg-emerald-700/30" />
           <div className="absolute bottom-6 left-6 right-6 text-white">
-            <div className="text-lg font-semibold">Create your account</div>
-            <div className="text-sm text-white/90">
-              Save your details for faster checkout.
+            <div className="text-2xl font-bold">Join us</div>
+            <div className="text-sm text-emerald-50 mt-2">
+              Get faster checkout and track your orders.
             </div>
           </div>
         </div>
 
         <div className="p-6 md:p-8">
-          <h2 className="text-2xl font-bold">Sign up</h2>
-          <p className="text-sm text-gray-600 mt-1">
-            Create an account to buy products.
+          <h2 className="text-3xl font-bold text-emerald-900">Create account</h2>
+          <p className="text-sm text-emerald-700 mt-1">
+            Welcome to Adriano
           </p>
 
           <form className="mt-6 space-y-4" onSubmit={handleSignup}>
             <div className="space-y-1">
-              <label className="text-sm text-gray-600">Full name</label>
+              <label className="text-sm font-semibold text-emerald-900">Full name</label>
               <input
-                className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-black/10"
+                className="w-full border border-emerald-900/20 rounded-xl px-4 py-2 outline-none focus:ring-2 focus:ring-emerald-600 transition"
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
                 placeholder="Your name"
@@ -71,9 +103,9 @@ export default function Signup() {
             </div>
 
             <div className="space-y-1">
-              <label className="text-sm text-gray-600">Contact number</label>
+              <label className="text-sm font-semibold text-emerald-900">Contact number</label>
               <input
-                className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-black/10"
+                className="w-full border border-emerald-900/20 rounded-xl px-4 py-2 outline-none focus:ring-2 focus:ring-emerald-600 transition"
                 value={contactNumber}
                 onChange={(e) => setContactNumber(e.target.value)}
                 placeholder="09xxxxxxxxx"
@@ -81,10 +113,9 @@ export default function Signup() {
             </div>
 
             <div className="space-y-1">
-              <label className="text-sm text-gray-600">Address</label>
+              <label className="text-sm font-semibold text-emerald-900">Address</label>
               <textarea
-                className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-black/10 min-h-24
-"
+                className="w-full border border-emerald-900/20 rounded-xl px-4 py-2 outline-none focus:ring-2 focus:ring-emerald-600 transition min-h-20"
                 value={address}
                 onChange={(e) => setAddress(e.target.value)}
                 placeholder="House/Street, Barangay, City, Province"
@@ -92,9 +123,9 @@ export default function Signup() {
             </div>
 
             <div className="space-y-1">
-              <label className="text-sm text-gray-600">Email</label>
+              <label className="text-sm font-semibold text-emerald-900">Email</label>
               <input
-                className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-black/10"
+                className="w-full border border-emerald-900/20 rounded-xl px-4 py-2 outline-none focus:ring-2 focus:ring-emerald-600 transition"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@email.com"
@@ -104,10 +135,10 @@ export default function Signup() {
             </div>
 
             <div className="space-y-1">
-              <label className="text-sm text-gray-600">Password</label>
+              <label className="text-sm font-semibold text-emerald-900">Password</label>
               <div className="relative">
                 <input
-                  className="w-full border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-black/10 pr-10"
+                  className="w-full border border-emerald-900/20 rounded-xl px-4 py-2 outline-none focus:ring-2 focus:ring-emerald-600 transition pr-10"
                   type={showPassword ? "text" : "password"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -118,7 +149,7 @@ export default function Signup() {
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-600 hover:text-gray-800"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-600 hover:text-emerald-800 transition"
                   title={showPassword ? "Hide password" : "Show password"}
                 >
                   {showPassword ? "👁️" : "👁️‍🗨️"}
@@ -128,16 +159,16 @@ export default function Signup() {
 
             <button
               disabled={busy}
-              className="w-full px-4 py-2 rounded-lg bg-black text-white hover:opacity-90 disabled:opacity-50"
+              className="w-full px-4 py-2 rounded-xl bg-emerald-700 text-white hover:bg-emerald-800 disabled:opacity-50 transition font-semibold"
             >
               {busy ? "Creating…" : "Create account"}
             </button>
 
-            {msg && <p className="text-sm text-red-600">{msg}</p>}
+            {msg && <p className="text-sm text-red-600 font-semibold">{msg}</p>}
 
-            <p className="text-sm text-gray-600">
+            <p className="text-sm text-emerald-700">
               Already have an account?{" "}
-              <Link to="/login" className="underline">
+              <Link to="/login" className="font-semibold hover:text-emerald-900 underline">
                 Log in
               </Link>
             </p>

@@ -3,6 +3,8 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import { supabase } from "./supabaseClient";
 
 import Navbar from "./components/Navbar";
+import SupabaseDebug from "./components/SupabaseDebug";
+import { setSupabaseError } from "./utils/supabaseDebug";
 
 import Checkout from "./pages/Checkout";
 import Home from "./pages/Home";
@@ -20,7 +22,7 @@ import SpecialOffers from "./pages/SpecialOffers";
  * - For Supabase PostgREST builders, we can abort using .abortSignal(signal).
  * - For plain promises, we just race with a timer.
  */
-function withTimeoutAbort(builderOrPromise, ms = 12000) {
+function withTimeoutAbort(builderOrPromise, ms = 60000) {
   // If it looks like a Postgrest builder (has abortSignal), use AbortController
   if (builderOrPromise && typeof builderOrPromise.abortSignal === "function") {
     const controller = new AbortController();
@@ -59,14 +61,14 @@ export default function App() {
       setLoadingProfile(true);
       try {
         // getSession usually returns fast; keep a generous timeout
-        const { data } = await withTimeoutAbort(supabase.auth.getSession(), 30000);
+        const { data } = await withTimeoutAbort(supabase.auth.getSession(), 60000);
         if (!alive) return;
 
         const s = data?.session ?? null;
         setSession(s);
 
         if (s?.user?.id) {
-          await loadProfile(s.user.id);
+          await safeLoadProfile(s.user.id);
         } else {
           setRole("user");
           setFullName("");
@@ -74,6 +76,7 @@ export default function App() {
         }
       } catch (e) {
         console.error("init error:", e);
+        try { setSupabaseError(`init: ${e?.message || String(e)}`); } catch (_) {}
         if (!alive) return;
         setSession(null);
         setRole("user");
@@ -90,8 +93,7 @@ export default function App() {
       setSession(newSession);
 
       if (newSession?.user?.id) {
-        setLoadingProfile(true);
-        await loadProfile(newSession.user.id);
+        await safeLoadProfile(newSession.user.id);
       } else {
         setRole("user");
         setFullName("");
@@ -106,34 +108,82 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  async function safeLoadProfile(userId) {
+    const watchdog = setTimeout(() => {
+      setLoadingProfile(false);
+    }, 65000);
+
+    try {
+      await loadProfile(userId);
+    } finally {
+      clearTimeout(watchdog);
+    }
+  }
+
   async function loadProfile(userId) {
     setLoadingProfile(true);
     try {
-      // ✅ Abortable timeout (prevents “hang forever”)
-      const { data, error } = await withTimeoutAbort(
-        supabase.from("profiles").select("role, full_name").eq("id", userId).maybeSingle(),
-        12000
-      );
+      async function callWithRetry(fn, retries = 2, delayMs = 600) {
+        let lastErr;
+        for (let i = 0; i <= retries; i++) {
+          try {
+            return await fn();
+          } catch (err) {
+            lastErr = err;
+            if (i < retries) await new Promise((r) => setTimeout(r, delayMs * (i + 1)));
+          }
+        }
+        throw lastErr;
+      }
 
-      if (error) {
+      let result;
+      try {
+        result = await callWithRetry(() =>
+          withTimeoutAbort(
+            supabase
+              .from("profiles")
+              .select("role, full_name")
+              .eq("id", userId)
+              .maybeSingle(),
+            60000
+          )
+        );
+      } catch (err) {
+        console.warn("Profile query failed:", err?.message);
+        result = { data: null, error: err };
+      }
+
+      const { data, error } = result;
+
+      // If there's an error that's not "no rows", log it
+      if (error && error.code !== "PGRST116") {
         console.error("loadProfile error:", error);
-        setRole("user");
-        setFullName("");
-        return;
       }
 
-      if (!data) {
-        console.warn("No profile row for:", userId);
+      // Set role and fullName from profile if available
+      if (data) {
+        const normalizedRole = String(data.role ?? "user")
+          .trim()
+          .toLowerCase();
+        setRole(normalizedRole);
+        setFullName(data.full_name ?? "");
+      } else {
+        // Profile doesn't exist or query failed - fall back to defaults
+        console.warn("Using default role=user (no profile found for:", userId);
         setRole("user");
         setFullName("");
-        return;
       }
-
-      const normalizedRole = String(data.role ?? "user").trim().toLowerCase();
-      setRole(normalizedRole);
-      setFullName(data.full_name ?? "");
     } catch (e) {
-      console.error("loadProfile timeout/crash:", e);
+      if (e?.name === "AbortError") {
+        console.warn("loadProfile aborted (AbortError). Treating as timeout.");
+      } else if (e?.message && e.message.includes("timeout")) {
+        console.warn("loadProfile timeout:", e.message);
+      } else {
+        console.error("loadProfile error:", e);
+      }
+      try {
+        setSupabaseError(`loadProfile: ${e?.message || String(e)}`);
+      } catch (_) {}
       setRole("user");
       setFullName("");
     } finally {
@@ -142,7 +192,8 @@ export default function App() {
   }
 
   return (
-    <>
+    <div className="bg-gray-50 min-h-screen">
+      <SupabaseDebug />
       <Navbar session={session} />
 
       {/* ✅ never blocks the site */}
@@ -186,6 +237,6 @@ export default function App() {
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-    </>
+    </div>
   );
 }

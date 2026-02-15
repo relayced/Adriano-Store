@@ -13,21 +13,51 @@ export default function Checkout() {
 
   async function loadProduct() {
     setMsg("");
-    const { data, error } = await supabase
-      .from("products")
-      .select("*")
-      .eq("id", Number(id))
-      .single();
+    try {
+      const timeoutMs = 60000;
+      const timeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Request timeout")), timeoutMs)
+      );
 
-    if (error) {
+      async function callWithRetry(fn, retries = 2, delayMs = 400) {
+        let lastErr;
+        for (let i = 0; i <= retries; i++) {
+          try {
+            return await fn();
+          } catch (err) {
+            lastErr = err;
+            if (i < retries) await new Promise((r) => setTimeout(r, delayMs * (i + 1)));
+          }
+        }
+        throw lastErr;
+      }
+
+      const q = supabase
+        .from("products")
+        .select("*")
+        .eq("id", Number(id))
+        .single();
+
+      const { data, error } = await callWithRetry(
+        () => Promise.race([q, timeout]),
+        2,
+        400
+      );
+
+      if (error) {
+        setProduct(null);
+        setMsg(error.message);
+        return;
+      }
+
+      setProduct(data);
+      const s = Number(data?.stock || 0);
+      setQty((q) => Math.min(Math.max(1, Number(q || 1)), Math.max(1, s)));
+    } catch (e) {
+      console.error("loadProduct error:", e);
       setProduct(null);
-      setMsg(error.message);
-      return;
+      setMsg(e?.message || "Failed to load product.");
     }
-
-    setProduct(data);
-    const s = Number(data?.stock || 0);
-    setQty((q) => Math.min(Math.max(1, Number(q || 1)), Math.max(1, s)));
   }
 
   useEffect(() => {

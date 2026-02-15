@@ -111,38 +111,72 @@ export default function Cart() {
       setLoadingUser(true);
       setErr("");
 
-      const { data, error } = await supabase.auth.getUser();
-      const user = data?.user;
+      try {
+        const timeoutMs = 60000;
+        const timeout = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("Request timeout")), timeoutMs)
+        );
 
-      if (!alive) return;
+        async function callWithRetry(fn, retries = 2, delayMs = 400) {
+          let lastErr;
+          for (let i = 0; i <= retries; i++) {
+            try {
+              return await fn();
+            } catch (err) {
+              lastErr = err;
+              if (i < retries) await new Promise((r) => setTimeout(r, delayMs * (i + 1)));
+            }
+          }
+          throw lastErr;
+        }
 
-      if (error) console.error("auth.getUser error:", error);
+        const userRes = await callWithRetry(
+          () => Promise.race([supabase.auth.getUser(), timeout]),
+          2,
+          400
+        );
+        const user = userRes?.data?.user;
 
-      if (!user) {
+        if (!alive) return;
+
+        if (userRes?.error) console.error("auth.getUser error:", userRes.error);
+
+        if (!user) {
+          setLoadingUser(false);
+          return;
+        }
+
+        setUserId(user.id);
+        setEmail(user.email || "");
+
+        const profileQuery = supabase
+          .from("profiles")
+          .select("full_name, contact_number, address")
+          .eq("id", user.id)
+          .maybeSingle();
+
+        const { data: profile, error: pErr } = await callWithRetry(
+          () => Promise.race([profileQuery, timeout]),
+          2,
+          400
+        );
+
+        if (!alive) return;
+
+        if (pErr) {
+          console.error("profiles select error:", pErr);
+        } else if (profile) {
+          setFullName(profile.full_name ?? "");
+          setContactNumber(profile.contact_number ?? "");
+          setAddress(profile.address ?? "");
+        }
+
         setLoadingUser(false);
-        return;
+      } catch (e) {
+        console.error("loadUserAndProfile error:", e);
+        if (!alive) return;
+        setLoadingUser(false);
       }
-
-      setUserId(user.id);
-      setEmail(user.email || "");
-
-      const { data: profile, error: pErr } = await supabase
-        .from("profiles")
-        .select("full_name, contact_number, address")
-        .eq("id", user.id)
-        .maybeSingle();
-
-      if (!alive) return;
-
-      if (pErr) {
-        console.error("profiles select error:", pErr);
-      } else if (profile) {
-        setFullName(profile.full_name ?? "");
-        setContactNumber(profile.contact_number ?? "");
-        setAddress(profile.address ?? "");
-      }
-
-      setLoadingUser(false);
     }
 
     loadUserAndProfile();
@@ -206,8 +240,37 @@ export default function Cart() {
       contact_number: contactNumber.trim(),
       address: address.trim(),
     };
-    const { error } = await supabase.from("profiles").update(payload).eq("id", userId);
-    if (error) throw error;
+
+    try {
+      const timeoutMs = 60000;
+      const timeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Request timeout")), timeoutMs)
+      );
+
+      async function callWithRetry(fn, retries = 2, delayMs = 400) {
+        let lastErr;
+        for (let i = 0; i <= retries; i++) {
+          try {
+            return await fn();
+          } catch (err) {
+            lastErr = err;
+            if (i < retries) await new Promise((r) => setTimeout(r, delayMs * (i + 1)));
+          }
+        }
+        throw lastErr;
+      }
+
+      const result = await callWithRetry(
+        () => Promise.race([supabase.from("profiles").update(payload).eq("id", userId), timeout]),
+        2,
+        400
+      );
+
+      if (result?.error) throw result.error;
+    } catch (e) {
+      console.error("saveProfileDetails error:", e);
+      throw e;
+    }
   }
 
   function toPurchaseItems(cart) {
@@ -303,21 +366,49 @@ export default function Cart() {
 
       const purchaseItems = toPurchaseItems(items);
 
-      const { error: rpcErr } = await supabase.rpc("purchase_cart", {
-        p_items: purchaseItems,
-        p_discount: Number(discount || 0),
-        p_shipping_fee: Number(shippingFee || 0),
-        p_shipping_zone: shippingMode === "gps" ? "gps" : shippingZone,
-        p_payment_method: paymentMethod,
-        p_coupon_code: coupon.trim() ? coupon.trim().toUpperCase() : null,
-        p_shipping_name: fullName.trim(),
-        p_shipping_contact: contactNumber.trim(),
-        p_shipping_address: address.trim(),
-        p_payment_reference: gcashReference.trim() || null,
-        p_payment_proof_url: proofUrl || null,
-      });
+      try {
+        const timeoutMs = 120000; // RPC calls may take longer
+        const timeout = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("Purchase timeout")), timeoutMs)
+        );
 
-      if (rpcErr) throw new Error(rpcErr.message || "Checkout failed.");
+        async function callWithRetry(fn, retries = 2, delayMs = 400) {
+          let lastErr;
+          for (let i = 0; i <= retries; i++) {
+            try {
+              return await fn();
+            } catch (err) {
+              lastErr = err;
+              if (i < retries) await new Promise((r) => setTimeout(r, delayMs * (i + 1)));
+            }
+          }
+          throw lastErr;
+        }
+
+        const rpcCall = supabase.rpc("purchase_cart", {
+          p_items: purchaseItems,
+          p_discount: Number(discount || 0),
+          p_shipping_fee: Number(shippingFee || 0),
+          p_shipping_zone: shippingMode === "gps" ? "gps" : shippingZone,
+          p_payment_method: paymentMethod,
+          p_coupon_code: coupon.trim() ? coupon.trim().toUpperCase() : null,
+          p_shipping_name: fullName.trim(),
+          p_shipping_contact: contactNumber.trim(),
+          p_shipping_address: address.trim(),
+          p_payment_reference: gcashReference.trim() || null,
+          p_payment_proof_url: proofUrl || null,
+        });
+
+        const { error: rpcErr } = await callWithRetry(
+          () => Promise.race([rpcCall, timeout]),
+          2,
+          400
+        );
+
+        if (rpcErr) throw new Error(rpcErr.message || "Checkout failed.");
+      } catch (rpcError) {
+        throw rpcError;
+      }
 
       // Clear cart
       setItems([]);
@@ -348,16 +439,16 @@ export default function Cart() {
   }, [gcashProofFile]);
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-10">
+    <main className="mx-auto max-w-6xl px-6 py-10 bg-white rounded-2xl mt-6 mb-6 shadow-sm">
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
         <div>
-          <h2 className="text-2xl font-bold">Profile</h2>
-          <p className="text-sm text-gray-600 mt-1">Manage your orders and cart.</p>
+          <h2 className="text-3xl font-bold text-emerald-900">Shopping Cart</h2>
+          <p className="text-sm text-emerald-700 mt-1">Review and checkout your order.</p>
         </div>
         <button
           type="button"
           onClick={() => setItemsState(getCart())}
-          className="px-3 py-2 rounded-lg border text-sm hover:bg-gray-50 w-fit"
+          className="px-4 py-2 rounded-lg border border-emerald-900/20 text-emerald-700 hover:bg-emerald-50 w-fit transition"
         >
           Refresh cart
         </button>
@@ -462,7 +553,7 @@ export default function Cart() {
                 type="button"
                 onClick={() => setShowCheckout(true)}
                 disabled={items.length === 0}
-                className="w-full mt-2 px-4 py-2 rounded-lg bg-orange-400 text-white text-sm font-semibold hover:opacity-90 disabled:opacity-50"
+                className="w-full mt-2 px-4 py-3 rounded-xl bg-green-600 text-white text-sm font-bold hover:bg-green-700 disabled:opacity-50 transition"
               >
                 Checkout
               </button>
@@ -495,13 +586,13 @@ export default function Cart() {
 
               {!loadingUser && !userId && (
                 <div className="mt-4">
-                  <p className="text-sm text-gray-600">Please log in to continue.</p>
+                  <p className="text-sm text-green-700">Please sign in to continue checkout.</p>
                   <button
                     type="button"
                     onClick={() => navigate("/login")}
-                    className="mt-3 px-4 py-2 rounded-lg bg-black text-white text-sm hover:opacity-90"
+                    className="mt-3 px-4 py-2 rounded-lg bg-green-600 text-white text-sm hover:bg-green-700 transition"
                   >
-                    Go to login
+                    Sign in
                   </button>
                 </div>
               )}

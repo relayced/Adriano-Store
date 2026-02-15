@@ -124,6 +124,7 @@ export default function Home({ session, fullName, role }) {
   const isMountedRef = useRef(true);
 
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
     };
@@ -131,14 +132,10 @@ export default function Home({ session, fullName, role }) {
 
   const displayName = (fullName || "").trim() || session?.user?.email?.split("@")?.[0] || "User";
 
-  const [newArrivals, setNewArrivals] = useState([]);
-  const [loadingArrivals, setLoadingArrivals] = useState(true);
-  const [arrivalsErr, setArrivalsErr] = useState("");
-
-  // timestamp (ms) of last successful arrivals fetch
-  const lastFetchRef = useRef(0);
-  // prevent concurrent fetches
-  const fetchInProgressRef = useRef(false);
+  const [allProducts, setAllProducts] = useState([]);
+  const [currentSlide, setCurrentSlide] = useState(0);
+  const [loadingSlideshow, setLoadingSlideshow] = useState(true);
+  const [slideshowErr, setSlideshowErr] = useState("");
 
   const [isAdmin, setIsAdmin] = useState(false);
   const [savingImageId, setSavingImageId] = useState(null);
@@ -176,104 +173,78 @@ export default function Home({ session, fullName, role }) {
     };
   }, [session?.user?.id, role]);
 
-  async function fetchNewArrivals(force = false) {
-    // avoid concurrent fetches
-    if (fetchInProgressRef.current) return;
-
-    // If data is fresh and not forced, skip fetching
-    const FRESH_MS = 60 * 1000; // 60s
-    if (!force && lastFetchRef.current && Date.now() - lastFetchRef.current < FRESH_MS) {
-      return;
-    }
-
-    // only show loading indicator if forcing or we have no data yet
-    if (isMountedRef.current) {
-      if (force || !newArrivals || newArrivals.length === 0) {
-        setLoadingArrivals(true);
-      }
-      setArrivalsErr("");
-    }
-    fetchInProgressRef.current = true;
-
-    const timeoutMs = 15000;
-    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("Request timeout")), timeoutMs));
+  async function fetchSlideshow() {
+    setLoadingSlideshow(true);
+    setSlideshowErr("");
+    setCurrentSlide(0);
 
     try {
-      // Attempt 1: order by created_at DESC (best if column exists)
-      const q1 = supabase
-        .from("products")
-        .select("id, name, description, price, category, stock, image_url, created_at")
-        .order("created_at", { ascending: false })
-        .limit(NEW_ARRIVALS_LIMIT);
+      const timeoutMs = 60000;
+      const timeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Request timeout")), timeoutMs)
+      );
 
-      let res;
-      try {
-        res = await Promise.race([q1, timeout]);
-      } catch (e) {
-        throw e;
-      }
-
-      // If created_at ordering fails (column missing), fall back to id DESC
-      if (res?.error && /created_at/i.test(res.error.message)) {
-        const q2 = supabase
-          .from("products")
-          .select("id, name, description, price, category, stock, image_url")
-          .order("id", { ascending: false })
-          .limit(NEW_ARRIVALS_LIMIT);
-
-        const res2 = await Promise.race([q2, timeout]);
-        if (!isMountedRef.current) return;
-
-        if (res2?.error) {
-          setArrivalsErr(res2.error.message || "Failed to load new arrivals.");
-          setNewArrivals([]);
-        } else {
-          setNewArrivals(Array.isArray(res2.data) ? res2.data : []);
-          lastFetchRef.current = Date.now();
+      async function callWithRetry(fn, retries = 2, delayMs = 400) {
+        let lastErr;
+        for (let i = 0; i <= retries; i++) {
+          try {
+            return await fn();
+          } catch (err) {
+            lastErr = err;
+            if (i < retries) await new Promise((r) => setTimeout(r, delayMs * (i + 1)));
+          }
         }
-        fetchInProgressRef.current = false;
-        if (isMountedRef.current) setLoadingArrivals(false);
-        return;
+        throw lastErr;
       }
+
+      const q = supabase.from("products").select("*").order("id", { ascending: false });
+      
+      const res = await callWithRetry(
+        () => Promise.race([q, timeout]),
+        2,
+        400
+      );
+
+      console.debug("[Home] slideshow result:", { hasData: !!res?.data, count: res?.data?.length || 0, error: res?.error?.message });
 
       if (!isMountedRef.current) return;
 
       if (res?.error) {
-        setArrivalsErr(res.error.message || "Failed to load new arrivals.");
-        setNewArrivals([]);
+        setSlideshowErr(res.error.message || "Failed to load slideshow.");
+        setAllProducts([]);
       } else {
-        setNewArrivals(Array.isArray(res.data) ? res.data : []);
-        lastFetchRef.current = Date.now();
+        setAllProducts(Array.isArray(res.data) ? res.data : []);
       }
     } catch (e) {
+      console.error("[Home] fetchSlideshow error:", e);
       if (!isMountedRef.current) return;
-      setArrivalsErr(e?.message || "Failed to load new arrivals.");
-      setNewArrivals([]);
+      setSlideshowErr(e?.message || "Failed to load slideshow.");
+      setAllProducts([]);
+      try {
+        const { setSupabaseError } = await import("../utils/supabaseDebug");
+        setSupabaseError(`Slideshow: ${e?.message || String(e)}`);
+      } catch (_) {}
     } finally {
-      fetchInProgressRef.current = false;
-      if (isMountedRef.current) setLoadingArrivals(false);
+      if (isMountedRef.current) setLoadingSlideshow(false);
     }
   }
 
+  // Fetch slideshow products on mount
   useEffect(() => {
-    // initial load
-    fetchNewArrivals();
-
-    // Refresh when tab focuses — but only if data is stale (fetchNewArrivals handles freshness)
-    const onFocus = () => fetchNewArrivals(false);
-
-    const onVis = () => {
-      if (document.visibilityState === "visible") fetchNewArrivals(false);
-    };
-    window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onVis);
-
-    return () => {
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onVis);
-    };
+    fetchSlideshow();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Auto-advance slideshow every 5 seconds
+  useEffect(() => {
+    if (allProducts.length === 0) return;
+
+    const interval = setInterval(() => {
+      setCurrentSlide((prev) => (prev + 1) % allProducts.length);
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [allProducts.length]);
 
   function addToCart(product) {
     if (!session) {
@@ -311,22 +282,22 @@ export default function Home({ session, fullName, role }) {
       const { error } = await supabase.from("products").update({ image_url: url }).eq("id", productId);
 
       if (error) {
-        setArrivalsErr(error.message);
+        setSlideshowErr(error.message);
         return;
       }
 
-      setNewArrivals((prev) => prev.map((p) => (p.id === productId ? { ...p, image_url: url } : p)));
+      setAllProducts((prev) => prev.map((p) => (p.id === productId ? { ...p, image_url: url } : p)));
     } catch (e) {
-      setArrivalsErr(e?.message || "Upload failed.");
+      setSlideshowErr(e?.message || "Upload failed.");
     } finally {
       setSavingImageId(null);
     }
   }
 
-  const hasArrivals = useMemo(() => newArrivals && newArrivals.length > 0, [newArrivals]);
+  const currentProduct = useMemo(() => allProducts[currentSlide] || null, [allProducts, currentSlide]);
 
   return (
-    <main className="mx-auto max-w-5xl px-6 py-12">
+    <main className="mx-auto max-w-5xl px-6 py-12 bg-white rounded-2xl mt-6 mb-6 shadow-sm">
       <h1 className="text-3xl font-bold tracking-tight">{session ? `Welcome, ${displayName}.` : "The smart way to shop for school."}</h1>
 
       <p className="mt-2 text-gray-600">Browse the latest arrivals and essentials for your studies.</p>
@@ -350,41 +321,140 @@ export default function Home({ session, fullName, role }) {
         ))}
       </section>
 
-      {/* NEW ARRIVALS */}
+      {/* PRODUCT SHOWCASE */}
       <section className="mt-10">
-        <div className="flex items-end justify-between gap-3">
-          <div>
-            <h2 className="text-xl font-bold text-[#0A2540]">New Arrivals</h2>
-            <p className="text-sm text-gray-600">Latest products added by the admin.</p>
+        {loadingSlideshow ? (
+          <div className="rounded-2xl bg-gradient-to-br from-emerald-50 to-emerald-100 p-12 text-center text-emerald-700">
+            <div className="text-lg font-semibold">Loading products…</div>
           </div>
-
-          <button type="button" onClick={() => fetchNewArrivals(true)} className="px-4 py-2 rounded-xl border bg-white hover:bg-gray-50">
-            Refresh
-          </button>
-        </div>
-
-        {loadingArrivals ? (
-          <div className="mt-4 border rounded-2xl p-6 bg-white text-gray-600">Loading new arrivals…</div>
-        ) : arrivalsErr ? (
-          <div className="mt-4 border rounded-2xl p-6 bg-white">
-            <div className="text-sm text-red-700 font-semibold">Couldn’t load products</div>
-            <div className="text-sm text-red-600 mt-1">{arrivalsErr}</div>
+        ) : slideshowErr ? (
+          <div className="rounded-2xl border border-emerald-900/20 bg-emerald-50 p-6">
+            <div className="text-sm text-emerald-700 font-semibold">Slideshow unavailable</div>
+            <div className="text-sm text-emerald-600 mt-2">{slideshowErr}</div>
           </div>
-        ) : !hasArrivals ? (
-          <div className="mt-4 border rounded-2xl p-6 bg-white text-gray-600">No new arrivals yet.</div>
+        ) : allProducts.length === 0 ? (
+          <div className="rounded-2xl bg-emerald-50 p-12 text-center text-emerald-700">
+            <div className="text-lg font-semibold">No products available.</div>
+          </div>
         ) : (
-          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-stretch">
-            {newArrivals.map((p) => (
-              <ProductCard
-                key={p.id}
-                product={p}
-                session={session}
-                isAdmin={isAdmin}
-                onAdd={addToCart}
-                onUpdateImage={handleUpdateImage}
-                savingImage={savingImageId === p.id}
-              />
-            ))}
+          <div className="space-y-8">
+            {/* Featured Product Slide (if available) */}
+            {currentProduct && (
+              <div className="rounded-2xl overflow-hidden bg-white border border-emerald-900/20 shadow-md">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-6 md:p-10">
+                  {/* Image */}
+                  <div className="flex items-center justify-center bg-emerald-50 rounded-xl h-80">
+                    {currentProduct.image_url ? (
+                      <img
+                        src={currentProduct.image_url}
+                        alt={currentProduct.name}
+                        className="w-full h-full object-cover rounded-xl"
+                      />
+                    ) : (
+                      <span className="text-emerald-300 text-center">No image</span>
+                    )}
+                  </div>
+
+                  {/* Content */}
+                  <div className="flex flex-col justify-center">
+                    <div className="text-xs text-emerald-600 uppercase tracking-widest font-semibold">{currentProduct.category || "Product"}</div>
+                    <h2 className="mt-2 text-3xl font-bold text-emerald-900">{currentProduct.name}</h2>
+                    <p className="mt-3 text-gray-700 leading-relaxed line-clamp-4">{currentProduct.description || "No description available."}</p>
+
+                    <div className="mt-6 flex items-center gap-6">
+                      <div className="text-4xl font-bold text-emerald-800">₱{Number(currentProduct.price || 0).toFixed(2)}</div>
+                      <button
+                        onClick={() => addToCart(currentProduct)}
+                        disabled={Number(currentProduct.stock || 0) === 0}
+                        className="px-6 py-3 rounded-lg bg-emerald-700 text-white font-semibold hover:bg-emerald-800 disabled:bg-gray-400"
+                      >
+                        {Number(currentProduct.stock || 0) > 0 ? "+ Add to Cart" : "Out of Stock"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Slide Navigation */}
+                <div className="flex items-center justify-between gap-4 px-6 py-4 bg-emerald-50 border-t border-emerald-900/20">
+                  <button
+                    onClick={() => setCurrentSlide((prev) => (prev - 1 + allProducts.length) % allProducts.length)}
+                    className="px-4 py-2 rounded-lg border border-emerald-900/20 hover:bg-emerald-100 text-emerald-700"
+                  >
+                    ← Previous
+                  </button>
+
+                  <div className="text-sm text-emerald-700 font-semibold">
+                    {currentSlide + 1} / {allProducts.length}
+                  </div>
+
+                  <button
+                    onClick={() => setCurrentSlide((prev) => (prev + 1) % allProducts.length)}
+                    className="px-4 py-2 rounded-lg border border-emerald-900/20 hover:bg-emerald-100 text-emerald-700"
+                  >
+                    Next →
+                  </button>
+                </div>
+
+                {/* Slide Indicators */}
+                <div className="flex justify-center gap-2 px-6 py-4 bg-white flex-wrap">
+                  {allProducts.map((_, i) => (
+                    <button
+                      key={i}
+                      onClick={() => setCurrentSlide(i)}
+                      className={`w-2 h-2 rounded-full transition ${
+                        i === currentSlide ? "bg-emerald-700" : "bg-emerald-300 hover:bg-emerald-400"
+                      }`}
+                      aria-label={`Go to slide ${i + 1}`}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* "You might need" Grid Section */}
+            <div>
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-bold text-emerald-900">You might need</h2>
+                <button
+                  onClick={() => document.querySelector('[href="/products"]')?.click()}
+                  className="text-emerald-600 hover:text-emerald-800 font-semibold text-sm"
+                >
+                  See more →
+                </button>
+              </div>
+
+              {/* Product Cards Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+                {allProducts.slice(0, 12).map((p) => (
+                  <div key={p.id} className="rounded-2xl bg-white border border-gray-100 shadow-sm hover:shadow-md transition overflow-hidden flex flex-col">
+                    {/* Image */}
+                    <div className="w-full h-32 bg-emerald-50 flex items-center justify-center overflow-hidden">
+                      {p.image_url ? (
+                        <img src={p.image_url} alt={p.name} className="w-full h-full object-cover" />
+                      ) : (
+                        <span className="text-xs text-gray-400">No image</span>
+                      )}
+                    </div>
+
+                    {/* Content */}
+                    <div className="p-3 flex flex-col flex-1">
+                      <div className="font-semibold text-sm text-gray-800 line-clamp-2">{p.name}</div>
+                      <div className="text-xs text-gray-500 mt-1">{p.category || "—"}</div>
+                      <div className="mt-auto pt-3 flex items-center justify-between">
+                        <div className="font-bold text-lg text-emerald-700">₱{Number(p.price || 0).toFixed(2)}</div>
+                        <button
+                          onClick={() => addToCart(p)}
+                          disabled={Number(p.stock || 0) === 0}
+                          className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-sm font-bold hover:bg-emerald-200 disabled:opacity-50"
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         )}
       </section>

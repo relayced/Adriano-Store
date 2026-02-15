@@ -30,14 +30,46 @@ export default function Products({ session }) {
     setLoading(true);
     setErrorMsg("");
 
-    const { data, error } = await supabase
-      .from("products")
-      .select("*")
-      .order("id", { ascending: false });
+    try {
+      const timeoutMs = 60000;
+      const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("Request timeout")), timeoutMs));
 
-    if (error) setErrorMsg(error.message);
-    setProducts(data || []);
-    setLoading(false);
+      async function callWithRetry(fn, retries = 2, delayMs = 400) {
+        let lastErr;
+        for (let i = 0; i <= retries; i++) {
+          try {
+            return await fn();
+          } catch (err) {
+            lastErr = err;
+            if (i < retries) {
+              console.log(`Retry attempt ${i + 1} after ${delayMs * (i + 1)}ms...`);
+              await new Promise((r) => setTimeout(r, delayMs * (i + 1)));
+            }
+          }
+        }
+        throw lastErr;
+      }
+
+      const q = supabase.from("products").select("*").order("id", { ascending: false });
+      const res = await callWithRetry(() => Promise.race([q, timeout]), 2, 400);
+
+      if (res?.error) {
+        setErrorMsg(res.error.message || "Failed to load products.");
+        setProducts([]);
+      } else {
+        setProducts(res?.data || []);
+      }
+    } catch (e) {
+      console.error("loadProducts error:", e);
+      setErrorMsg(e?.message || "Failed to load products.");
+      setProducts([]);
+      try {
+        const { setSupabaseError } = await import("../utils/supabaseDebug");
+        setSupabaseError(`Products: ${e?.message || String(e)}`);
+      } catch (_) {}
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -90,18 +122,18 @@ export default function Products({ session }) {
   }, [products, category, search]);
 
   return (
-    <main className="mx-auto max-w-5xl px-6 py-10">
+    <main className="mx-auto max-w-5xl px-6 py-10 bg-white rounded-2xl mt-6 mb-6 shadow-sm">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h2 className="text-2xl font-bold">Products</h2>
-          <p className="mt-1 text-sm text-gray-600">
-            Browse products and add to cart.
+          <h2 className="text-3xl font-bold text-emerald-900">Shop All Products</h2>
+          <p className="mt-1 text-sm text-emerald-700">
+            Discover everything you need
           </p>
         </div>
 
         <button
           onClick={loadProducts}
-          className="px-3 py-2 text-sm rounded-lg border hover:bg-gray-50 w-fit"
+          className="px-4 py-2 text-sm rounded-lg border border-emerald-900/20 text-emerald-700 hover:bg-emerald-50 transition w-fit"
         >
           Refresh
         </button>
@@ -114,13 +146,13 @@ export default function Products({ session }) {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search products…"
-            className="w-full border rounded-lg px-3 py-2 text-sm"
+            className="w-full border border-emerald-900/20 rounded-xl px-4 py-2 text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-emerald-600"
           />
         </div>
 
         <div className="w-full md:w-64">
           <select
-            className="w-full border rounded-lg px-3 py-2 text-sm bg-white"
+            className="w-full border border-emerald-900/20 rounded-xl px-4 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-600"
             value={category}
             onChange={(e) => setCategory(e.target.value)}
           >
@@ -134,77 +166,78 @@ export default function Products({ session }) {
       </div>
 
       {errorMsg && (
-        <p className="mt-4 text-sm text-red-600">{errorMsg}</p>
+        <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          {errorMsg}
+        </div>
       )}
 
       {loading ? (
-        <p className="mt-8 text-gray-600">Loading products…</p>
+        <div className="mt-8 flex items-center justify-center py-12">
+          <div className="text-center">
+            <div className="w-10 h-10 border-4 border-emerald-200 border-t-emerald-700 rounded-full animate-spin mx-auto mb-3"></div>
+            <p className="text-emerald-700 font-semibold">Loading products…</p>
+          </div>
+        </div>
       ) : (
-        <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="mt-8 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
           {filtered.map((p) => {
             const stock = Number(p.stock || 0);
 
             return (
               <div
                 key={p.id}
-                className="border rounded-2xl bg-white overflow-hidden flex flex-col"
+                className="rounded-2xl bg-white border border-gray-100 shadow-sm hover:shadow-md transition overflow-hidden flex flex-col h-full"
               >
-                <div className="h-44 bg-gray-100 overflow-hidden flex items-center justify-center">
+                {/* Product Image */}
+                <div className="w-full h-32 bg-green-50 overflow-hidden flex items-center justify-center">
                   {p.image_url ? (
                     <img
                       src={p.image_url}
                       alt={p.name}
-                      className="h-full w-full object-cover"
+                      className="w-full h-full object-cover"
                     />
                   ) : (
-                    <span className="text-sm text-gray-400">No image</span>
+                    <span className="text-xs text-gray-400">No image</span>
                   )}
                 </div>
 
-                <div className="p-4 flex flex-col flex-1">
-                  <div className="text-xs text-gray-500">{p.category || "—"}</div>
-                  <div className="mt-1 font-semibold">{p.name}</div>
+                {/* Card Content */}
+                <div className="p-3 flex flex-col flex-1">
+                  {/* Category & Name */}
+                  <div className="text-xs text-gray-500 uppercase tracking-wide">{p.category || "—"}</div>
+                  <div className="mt-1 font-bold text-sm text-gray-800 line-clamp-2 min-h-8">{p.name}</div>
 
-                  {/* ✅ Keeps card height stable so buttons align even if description is 1–2 lines */}
-                  <div className="mt-1 text-sm text-gray-600 line-clamp-2 min-h-10">
+                  {/* Description (small spec text) */}
+                  <div className="mt-1 text-xs text-gray-500 line-clamp-1">
                     {p.description || "—"}
                   </div>
 
-                  <div className="mt-auto pt-4 flex items-center justify-between">
-                    <div className="font-semibold">
+                  {/* Price and Stock Info */}
+                  <div className="mt-auto pt-3 flex items-center justify-between border-t border-gray-100 pt-3">
+                    <div className="font-bold text-lg text-emerald-700">
                       ₱{Number(p.price || 0).toFixed(2)}
                     </div>
-                    <div className="text-xs text-gray-500">Stock: {stock}</div>
+                    <div className="text-xs text-gray-500">{stock > 0 ? `${stock} left` : "Out"}</div>
                   </div>
 
-                  <div className="mt-3 flex gap-2">
-                    <button
-                      onClick={() => addToCart(p, false)}
-                      className="flex-1 px-3 py-2 text-sm rounded-lg border hover:bg-gray-50"
-                    >
-                      Add
-                    </button>
-
-                    {stock > 0 ? (
-                      <button
-                        onClick={() => addToCart(p, true)}
-                        className="flex-1 text-center px-3 py-2 text-sm rounded-lg bg-black text-white hover:opacity-90"
-                      >
-                        Buy
-                      </button>
-                    ) : (
-                      <span className="flex-1 text-center px-3 py-2 text-sm rounded-lg border text-gray-500">
-                        Out
-                      </span>
-                    )}
-                  </div>
+                  {/* Add to Cart Button */}
+                  <button
+                    onClick={() => addToCart(p)}
+                    disabled={stock === 0}
+                    className="mt-3 w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-lg font-bold hover:bg-emerald-200 disabled:opacity-50 disabled:cursor-not-allowed transition mx-auto"
+                    title={stock > 0 ? "Add to cart" : "Out of stock"}
+                  >
+                    +
+                  </button>
                 </div>
               </div>
             );
           })}
 
           {filtered.length === 0 && (
-            <p className="text-gray-600">No products found.</p>
+            <div className="col-span-full text-center py-8">
+              <p className="text-gray-600 text-sm">No products found.</p>
+            </div>
           )}
         </div>
       )}
