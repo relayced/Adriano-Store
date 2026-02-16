@@ -51,7 +51,7 @@ export default function Navbar({ session }) {
           {!session ? (
             <button
               onClick={() => navigate("/login")}
-              className="hidden sm:flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-700 text-white text-sm hover:bg-emerald-800 transition"
+              className="hidden sm:flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-700 text-white text-sm hover:bg-emerald-800 transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
             >
               <span className="text-lg">👤</span>
               Sign In
@@ -59,7 +59,7 @@ export default function Navbar({ session }) {
           ) : (
             <button
               onClick={() => navigate("/profile")}
-              className="hidden sm:block px-4 py-2 rounded-full border border-emerald-900/20 text-emerald-700 text-sm hover:bg-emerald-50 transition"
+              className="hidden sm:block px-4 py-2 rounded-full border border-emerald-900/20 text-emerald-700 text-sm hover:bg-emerald-50 transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
             >
               Profile
             </button>
@@ -112,7 +112,7 @@ export default function Navbar({ session }) {
                   navigate("/login");
                   closeMobileMenu();
                 }}
-                className="w-full mt-4 flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-700 text-white text-sm hover:bg-emerald-800 transition"
+                className="w-full mt-4 flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-700 text-white text-sm hover:bg-emerald-800 transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
               >
                 <span className="text-lg">👤</span>
                 Sign In
@@ -123,7 +123,7 @@ export default function Navbar({ session }) {
                   navigate("/profile");
                   closeMobileMenu();
                 }}
-                className="w-full mt-4 px-4 py-2 rounded-lg border border-emerald-900/20 text-emerald-700 text-sm hover:bg-emerald-100 transition"
+                className="w-full mt-4 px-4 py-2 rounded-lg border border-emerald-900/20 text-emerald-700 text-sm hover:bg-emerald-100 transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
               >
                 Profile
               </button>

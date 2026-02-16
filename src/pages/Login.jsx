@@ -118,7 +118,7 @@ export default function Login() {
 
             <button
               disabled={busy}
-              className="w-full px-4 py-2 rounded-xl bg-emerald-700 text-white hover:bg-emerald-800 disabled:opacity-50 transition font-semibold"
+              className="w-full px-4 py-2 rounded-xl bg-emerald-700 text-white hover:bg-emerald-800 disabled:opacity-50 transition font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
             >
               {busy ? "Signing in…" : "Sign in"}
             </button>

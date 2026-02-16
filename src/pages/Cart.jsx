@@ -72,6 +72,7 @@ export default function Cart() {
 
   // Checkout UI
   const [showCheckout, setShowCheckout] = useState(false);
+  const [checkoutItemProductId, setCheckoutItemProductId] = useState(null); // for per-item checkout
   const [paymentMethod, setPaymentMethod] = useState("COD"); // "GCash" | "COD"
   const [coupon, setCoupon] = useState("");
   const [couponMsg, setCouponMsg] = useState("");
@@ -205,14 +206,6 @@ export default function Cart() {
     );
   }, [items]);
 
-  const discount = useMemo(() => {
-    const code = coupon.trim().toUpperCase();
-    if (!code) return 0;
-    if (code === "SAVE10") return subtotal * 0.1;
-    if (code === "LESS50") return 50;
-    return 0;
-  }, [coupon, subtotal]);
-
   const shippingFee = useMemo(() => {
     if (shippingMode === "gps") {
       if (distanceKm == null) return 0;
@@ -221,6 +214,14 @@ export default function Cart() {
     const z = SHIPPING_ZONES.find((x) => x.value === shippingZone);
     return z ? Number(z.fee || 0) : 0;
   }, [shippingMode, distanceKm, shippingZone]);
+
+  const discount = useMemo(() => {
+    const code = coupon.trim().toUpperCase();
+    if (!code) return 0;
+    if (code === "SAVE10") return subtotal * 0.1;
+    if (code === "LESS50") return 50;
+    return 0;
+  }, [coupon, subtotal]);
 
   const grandTotal = Math.max(0, subtotal - discount + shippingFee);
 
@@ -364,7 +365,12 @@ export default function Cart() {
         proofUrl = await uploadGcashProof(userId);
       }
 
-      const purchaseItems = toPurchaseItems(items);
+      // If individual checkout, only purchase the selected item
+      const cartForPurchase = checkoutItemProductId
+        ? items.filter(x => x.product_id === checkoutItemProductId)
+        : items;
+
+      const purchaseItems = toPurchaseItems(cartForPurchase);
 
       try {
         const timeoutMs = 120000; // RPC calls may take longer
@@ -410,9 +416,14 @@ export default function Cart() {
         throw rpcError;
       }
 
-      // Clear cart
-      setItems([]);
+      // If individual checkout, remove only that item from cart; otherwise clear entire cart
+      if (checkoutItemProductId) {
+        setItems(items.filter(x => x.product_id !== checkoutItemProductId));
+      } else {
+        setItems([]);
+      }
       setShowCheckout(false);
+      setCheckoutItemProductId(null);
 
       // Reset gcash fields
       setGcashProofFile(null);
@@ -448,7 +459,7 @@ export default function Cart() {
         <button
           type="button"
           onClick={() => setItemsState(getCart())}
-          className="px-4 py-2 rounded-lg border border-emerald-900/20 text-emerald-700 hover:bg-emerald-50 w-fit transition"
+          className="px-4 py-2 rounded-lg border border-emerald-900/20 text-emerald-700 hover:bg-emerald-50 w-fit transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
         >
           Refresh cart
         </button>
@@ -460,21 +471,9 @@ export default function Cart() {
         <section className="space-y-6">
           <div className="flex items-end justify-between gap-3">
             <div>
-              <h3 className="text-lg font-semibold">Cart</h3>
-              {email && <p className="text-xs text-gray-500 mt-1">Signed in: {email}</p>}
+              <h3 className="text-lg font-semibold text-emerald-900">Cart</h3>
+              {email && <p className="text-xs text-emerald-700 mt-1">Signed in: {email}</p>}
             </div>
-
-            <button
-              type="button"
-              onClick={() => {
-                setErr("");
-                setShowCheckout((v) => !v);
-              }}
-              disabled={items.length === 0}
-              className="px-4 py-2 rounded-lg bg-black text-white text-sm hover:opacity-90 disabled:opacity-50"
-            >
-              {showCheckout ? "Close checkout" : "Buy"}
-            </button>
           </div>
 
           {err && (
@@ -483,143 +482,173 @@ export default function Cart() {
             </div>
           )}
 
-          <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
+          <div className="grid grid-cols-1 gap-6">
             <div className="space-y-3">
               {items.map((x) => (
                 <div
                   key={x.product_id}
-                  className="border rounded-2xl p-4 bg-white flex flex-col sm:flex-row sm:items-center gap-4"
+                  className="border border-emerald-200 rounded-2xl p-4 bg-emerald-50 flex flex-col sm:flex-row sm:items-center gap-4"
                 >
-                  <div className="w-16 h-16 rounded-xl border bg-gray-100 overflow-hidden flex items-center justify-center shrink-0">
+                  <div className="w-16 h-16 rounded-xl border border-emerald-200 bg-white overflow-hidden flex items-center justify-center shrink-0">
                     {x.image_url ? (
                       <img src={x.image_url} alt={x.name} className="w-full h-full object-cover" />
                     ) : (
-                      <span className="text-xs text-gray-400">No img</span>
+                      <span className="text-xs text-emerald-400">No img</span>
                     )}
                   </div>
 
                   <div className="flex-1 min-w-0">
-                    <div className="font-semibold truncate">{x.name}</div>
-                    <div className="text-sm text-gray-600">{money(x.price)}</div>
+                    <div className="font-semibold text-emerald-900 truncate">{x.name}</div>
+                    <div className="text-sm text-emerald-700">{money(x.price)}</div>
                   </div>
 
                   <div className="flex items-center gap-2">
                     <input
                       type="number"
                       min={1}
-                      className="w-24 border rounded-lg px-3 py-2 text-sm"
+                      className="w-24 border border-emerald-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                       value={x.qty}
                       onChange={(e) => updateQty(x.product_id, e.target.value)}
                     />
                     <button
                       onClick={() => removeItem(x.product_id)}
-                      className="px-3 py-2 text-sm rounded-lg border hover:bg-gray-50"
+                      className="px-3 py-2 text-sm rounded-lg border border-emerald-300 bg-white text-emerald-700 hover:bg-emerald-100 transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
                     >
                       Remove
+                    </button>
+                    <button
+                      onClick={() => {
+                        setErr("");
+                        setCheckoutItemProductId(x.product_id);
+                        setShowCheckout(true);
+                      }}
+                      className="px-3 py-2 text-sm rounded-lg bg-emerald-700 text-white hover:bg-emerald-800 transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+                    >
+                      Buy
                     </button>
                   </div>
                 </div>
               ))}
 
               {items.length === 0 && (
-                <div className="border rounded-2xl p-6 bg-white text-gray-600">
+                <div className="border border-emerald-200 rounded-2xl p-6 bg-emerald-50 text-emerald-700">
                   Your cart is empty.
-                  <button className="ml-2 underline" onClick={() => navigate("/products")}>
+                  <button className="ml-2 font-semibold text-emerald-900 hover:text-emerald-800" onClick={() => navigate("/products")}>
                     Browse products
                   </button>
                 </div>
               )}
             </div>
-
-            <div className="lg:sticky lg:top-6 h-fit border rounded-2xl p-5 bg-white space-y-3">
-              <div className="text-sm font-semibold">Summary</div>
-
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-600">Subtotal</span>
-                <span className="font-semibold">{money(subtotal)}</span>
-              </div>
-
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-600">Shipping</span>
-                <span className="font-semibold">{money(shippingFee)}</span>
-              </div>
-
-              <div className="pt-3 border-t flex justify-between">
-                <span className="font-semibold">Grand total</span>
-                <span className="font-semibold">{money(grandTotal)}</span>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setShowCheckout(true)}
-                disabled={items.length === 0}
-                className="w-full mt-2 px-4 py-3 rounded-xl bg-green-600 text-white text-sm font-bold hover:bg-green-700 disabled:opacity-50 transition"
-              >
-                Checkout
-              </button>
-
-              <p className="text-xs text-gray-500">
-                Shipping fee uses free GPS distance or a zone fallback.
-              </p>
-            </div>
           </div>
 
           {showCheckout && (
-            <div className="border rounded-2xl p-6 bg-white">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h4 className="text-base font-semibold">Checkout</h4>
-                  <p className="text-sm text-gray-600 mt-1">
-                    Confirm your details, shipping, and payment.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowCheckout(false)}
-                  className="px-3 py-2 text-sm rounded-lg border hover:bg-gray-50"
-                >
-                  Close
-                </button>
-              </div>
-
-              {loadingUser && <p className="mt-4 text-gray-600">Loading account…</p>}
-
-              {!loadingUser && !userId && (
-                <div className="mt-4">
-                  <p className="text-sm text-green-700">Please sign in to continue checkout.</p>
+            <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50 overflow-y-auto">
+              <div className="w-full max-w-2xl bg-white rounded-2xl border border-emerald-200 shadow-lg overflow-hidden my-8">
+                <div className="p-5 border-b border-emerald-200 bg-emerald-50 flex items-start justify-between gap-3">
+                  <div>
+                    <h4 className="text-base font-semibold text-emerald-900">
+                      Checkout {checkoutItemProductId && items.find(x => x.product_id === checkoutItemProductId) && `- ${items.find(x => x.product_id === checkoutItemProductId)?.name}`}
+                    </h4>
+                    <p className="text-sm text-emerald-700 mt-1">
+                      Confirm your details, shipping, and payment.
+                    </p>
+                  </div>
                   <button
                     type="button"
-                    onClick={() => navigate("/login")}
-                    className="mt-3 px-4 py-2 rounded-lg bg-green-600 text-white text-sm hover:bg-green-700 transition"
+                    onClick={() => {
+                      setShowCheckout(false);
+                      setCheckoutItemProductId(null);
+                    }}
+                    className="text-2xl text-emerald-700 hover:text-emerald-900 shrink-0"
                   >
-                    Sign in
+                    ×
                   </button>
                 </div>
-              )}
+
+                <div className="p-5 space-y-5 max-h-[70vh] overflow-y-auto">
+                  {/* Product info for individual checkout */}
+                  {checkoutItemProductId && items.find(x => x.product_id === checkoutItemProductId) && (
+                    <div className="border border-emerald-200 rounded-xl p-4 bg-emerald-50">
+                      <div className="grid grid-cols-[120px_1fr] gap-4">
+                        <div className="w-28 h-28 rounded-lg border border-emerald-200 bg-white overflow-hidden flex items-center justify-center">
+                          {items.find(x => x.product_id === checkoutItemProductId)?.image_url ? (
+                            <img 
+                              src={items.find(x => x.product_id === checkoutItemProductId)?.image_url} 
+                              alt={items.find(x => x.product_id === checkoutItemProductId)?.name}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <span className="text-xs text-emerald-400">No img</span>
+                          )}
+                        </div>
+                        <div className="flex flex-col justify-between">
+                          <div>
+                            <div className="font-semibold text-emerald-900 text-base">{items.find(x => x.product_id === checkoutItemProductId)?.name}</div>
+                            <div className="text-sm text-emerald-700 mt-1">{money(items.find(x => x.product_id === checkoutItemProductId)?.price || 0)} per item</div>
+                          </div>
+                          <div>
+                            <label className="text-xs text-emerald-700 font-medium block mb-2">Quantity</label>
+                            <input
+                              type="number"
+                              min={1}
+                              className="w-20 border border-emerald-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                              value={items.find(x => x.product_id === checkoutItemProductId)?.qty || 1}
+                              onChange={(e) => updateQty(checkoutItemProductId, e.target.value)}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                      <div className="mt-4 pt-4 border-t border-emerald-200 flex justify-between">
+                        <span className="text-emerald-700 font-medium">Subtotal</span>
+                        <span className="font-semibold text-emerald-900">{money((items.find(x => x.product_id === checkoutItemProductId)?.price || 0) * (items.find(x => x.product_id === checkoutItemProductId)?.qty || 1))}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Shipping fee section */}
+                  <div className="pt-3 border-t border-emerald-200 flex justify-between text-sm">
+                    <span className="text-emerald-700">Shipping fee</span>
+                    <span className="font-semibold text-emerald-900">{money(shippingFee)}</span>
+                  </div>
+
+                  {loadingUser && <p className="mt-4 text-emerald-700">Loading account…</p>}
+
+                  {!loadingUser && !userId && (
+                    <div className="mt-4">
+                      <p className="text-sm text-emerald-700 font-medium">Please sign in to continue checkout.</p>
+                      <button
+                        type="button"
+                        onClick={() => navigate("/login")}
+                        className="mt-3 px-4 py-2 rounded-lg bg-emerald-700 text-white text-sm hover:bg-emerald-800 transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+                      >
+                        Sign in
+                      </button>
+                    </div>
+                  )}
 
               {!loadingUser && userId && (
                 <>
                   <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <label className="text-xs text-gray-500">Full name</label>
+                      <label className="text-xs text-emerald-700 font-medium">Full name</label>
                       <input
-                        className="mt-1 w-full border rounded-lg px-3 py-2 text-sm"
+                        className="mt-1 w-full border border-emerald-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                         value={fullName}
                         onChange={(e) => setFullName(e.target.value)}
                       />
                     </div>
                     <div>
-                      <label className="text-xs text-gray-500">Contact number</label>
+                      <label className="text-xs text-emerald-700 font-medium">Contact number</label>
                       <input
-                        className="mt-1 w-full border rounded-lg px-3 py-2 text-sm"
+                        className="mt-1 w-full border border-emerald-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                         value={contactNumber}
                         onChange={(e) => setContactNumber(e.target.value)}
                       />
                     </div>
                     <div className="sm:col-span-2">
-                      <label className="text-xs text-gray-500">Address</label>
+                      <label className="text-xs text-emerald-700 font-medium">Address</label>
                       <textarea
-                        className="mt-1 w-full border rounded-lg px-3 py-2 text-sm min-h-[110px]"
+                        className="mt-1 w-full border border-emerald-200 rounded-lg px-3 py-2 text-sm min-h-[110px] focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                         value={address}
                         onChange={(e) => setAddress(e.target.value)}
                       />
@@ -627,116 +656,73 @@ export default function Cart() {
                   </div>
 
                   {/* Shipping */}
-                  <div className="mt-5 border rounded-xl p-4 bg-gray-50">
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                      <div>
-                        <div className="text-sm font-semibold">Shipping fee</div>
-                        <div className="text-xs text-gray-600">
-                          GPS = real distance (free), Zone = manual fallback.
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setShippingMode("gps")}
-                          className={`px-3 py-2 rounded-lg border text-sm ${
-                            shippingMode === "gps"
-                              ? "bg-black text-white border-black"
-                              : "hover:bg-white"
-                          }`}
-                        >
-                          GPS
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setShippingMode("zone")}
-                          className={`px-3 py-2 rounded-lg border text-sm ${
-                            shippingMode === "zone"
-                              ? "bg-black text-white border-black"
-                              : "hover:bg-white"
-                          }`}
-                        >
-                          Zone
-                        </button>
+                  <div className="mt-5 border border-emerald-200 rounded-xl p-4 bg-emerald-50">
+                    <div className="mb-3">
+                      <div className="text-sm font-semibold text-emerald-900">Shipping fee</div>
+                      <div className="text-xs text-emerald-700">
+                        Share your location for accurate delivery distance calculation.
                       </div>
                     </div>
 
-                    {shippingMode === "gps" ? (
-                      <div className="mt-3">
-                        <button
-                          type="button"
-                          onClick={useMyLocation}
-                          className="px-4 py-2 rounded-lg bg-white border text-sm hover:bg-gray-50"
-                        >
-                          Use my location
-                        </button>
-                        {locStatus && (
-                          <div className="mt-2 text-sm text-gray-700">{locStatus}</div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="mt-3">
-                        <label className="text-xs text-gray-600">Select zone</label>
-                        <select
-                          className="mt-1 w-full border rounded-lg px-3 py-2 text-sm bg-white"
-                          value={shippingZone}
-                          onChange={(e) => setShippingZone(e.target.value)}
-                        >
+                    <div className="mt-3">
+                      <button
+                        type="button"
+                        onClick={useMyLocation}
+                        className="px-4 py-2 rounded-lg bg-white border border-emerald-300 text-sm text-emerald-700 hover:bg-emerald-100 transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+                      >
+                        📍 Use my location
+                      </button>
+                      {locStatus && (
+                        <div className="mt-2 text-sm text-emerald-700">{locStatus}</div>
+                      )}
+                    </div>
 
-                        </select>
-                      </div>
-                    )}
-
-                    <div className="mt-3 flex justify-between text-sm">
-                      <span className="text-gray-600">Shipping fee</span>
-                      <span className="font-semibold">{money(shippingFee)}</span>
+                    <div className="mt-4 flex justify-between text-sm">
+                      <span className="text-emerald-700 font-medium">Shipping fee</span>
+                      <span className="font-semibold text-emerald-900">{money(shippingFee)}</span>
                     </div>
                   </div>
 
                   {/* Coupon */}
                   <div className="mt-5">
-                    <label className="text-xs text-gray-500">Coupon code</label>
+                    <label className="text-xs text-emerald-700 font-medium">Coupon code</label>
                     <div className="mt-1 flex gap-2">
                       <input
-                        className="flex-1 border rounded-lg px-3 py-2 text-sm"
+                        className="flex-1 border border-emerald-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                         value={coupon}
                         onChange={(e) => setCoupon(e.target.value)}
-                        placeholder="e.g. SAVE10 or LESS50"
+                        placeholder="Coupon code"
                       />
                       <button
                         type="button"
                         onClick={applyCoupon}
-                        className="px-4 py-2 rounded-lg border text-sm hover:bg-gray-50"
+                        className="px-4 py-2 rounded-lg border border-emerald-300 bg-white text-emerald-700 hover:bg-emerald-100 text-sm transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
                       >
                         Apply
                       </button>
                     </div>
-                    {couponMsg && <p className="mt-2 text-sm text-gray-600">{couponMsg}</p>}
+                    {couponMsg && <p className="mt-2 text-sm text-emerald-700">{couponMsg}</p>}
                   </div>
 
                   {/* Payment */}
                   <div className="mt-5">
-                    <label className="text-xs text-gray-500">Payment method</label>
-                    <div className="mt-2 flex flex-wrap gap-2">
+                    <label className="text-xs text-emerald-700 font-medium">Payment method</label>
+                    <div className="mt-1 text-xs text-amber-700 font-medium">ℹ️ GCash payment is currently unavailable. Please use Cash on Delivery.</div>
+                    <div className="mt-3 flex flex-wrap gap-2">
                       <button
                         type="button"
-                        onClick={() => setPaymentMethod("GCash")}
-                        className={`px-4 py-2 rounded-lg border text-sm ${
-                          paymentMethod === "GCash"
-                            ? "bg-black text-white border-black"
-                            : "hover:bg-gray-50"
-                        }`}
+                        disabled={true}
+                        className="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-500 bg-gray-100 cursor-not-allowed"
                       >
-                        GCash
+                        GCash (Unavailable)
                       </button>
                       <button
                         type="button"
                         onClick={() => setPaymentMethod("COD")}
-                        className={`px-4 py-2 rounded-lg border text-sm ${
+                        className={`px-4 py-2 rounded-lg border text-sm transition ${
                           paymentMethod === "COD"
-                            ? "bg-black text-white border-black"
-                            : "hover:bg-gray-50"
+                            ? "bg-emerald-700 text-white border-emerald-700"
+                            : "border-emerald-200 text-emerald-700 hover:bg-emerald-100"
                         }`}
                       >
                         COD
@@ -744,9 +730,9 @@ export default function Cart() {
                     </div>
 
                     {paymentMethod === "GCash" && (
-                      <div className="mt-4 rounded-xl border bg-blue-50 p-4 text-sm">
-                        <div className="font-semibold">GCash Payment Instructions</div>
-                        <div className="mt-2 text-gray-800">
+                      <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm">
+                        <div className="font-semibold text-emerald-900">GCash Payment Instructions</div>
+                        <div className="mt-2 text-emerald-900">
                           Send payment to:
                           <div className="mt-2 text-sm">
                             <div><b>Name:</b> {GCASH_NAME}</div>
@@ -757,11 +743,11 @@ export default function Cart() {
 
                         <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div>
-                            <label className="text-xs text-gray-600">
+                            <label className="text-xs text-emerald-700 font-medium">
                               Reference number (optional)
                             </label>
                             <input
-                              className="mt-1 w-full border rounded-lg px-3 py-2 text-sm bg-white"
+                              className="mt-1 w-full border border-emerald-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                               value={gcashReference}
                               onChange={(e) => setGcashReference(e.target.value)}
                               placeholder="e.g. 1234567890"
@@ -769,7 +755,7 @@ export default function Cart() {
                           </div>
 
                           <div>
-                            <label className="text-xs text-gray-600">
+                            <label className="text-xs text-emerald-700 font-medium">
                               Upload proof screenshot (required)
                             </label>
                             <input
@@ -783,20 +769,20 @@ export default function Cart() {
 
                         {gcashProofPreview && (
                           <div className="mt-3">
-                            <div className="text-xs text-gray-600 mb-2">Preview</div>
+                            <div className="text-xs text-emerald-700 font-medium mb-2">Preview</div>
                             <img
                               src={gcashProofPreview}
                               alt="GCash proof preview"
-                              className="w-full max-w-sm rounded-xl border bg-white"
+                              className="w-full max-w-sm rounded-xl border border-emerald-200 bg-white"
                             />
                           </div>
                         )}
 
                         {uploadingProof && (
-                          <div className="mt-3 text-xs text-gray-700">Uploading proof…</div>
+                          <div className="mt-3 text-xs text-emerald-700 font-medium">Uploading proof…</div>
                         )}
 
-                        <div className="mt-3 text-xs text-gray-600">
+                        <div className="mt-3 text-xs text-emerald-700">
                           Your payment will be marked <b>Pending Verification</b> until admin confirms.
                         </div>
                       </div>
@@ -807,12 +793,14 @@ export default function Cart() {
                     type="button"
                     onClick={placeOrder}
                     disabled={placing || items.length === 0 || uploadingProof}
-                    className="mt-6 w-full px-4 py-2 rounded-lg bg-orange-400 text-white text-sm font-semibold hover:opacity-90 disabled:opacity-50"
+                    className="mt-6 w-full px-4 py-2 rounded-lg bg-emerald-700 text-white text-sm font-semibold hover:bg-emerald-800 disabled:opacity-50 transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
                   >
                     {placing ? "Placing order…" : "Place order"}
                   </button>
                 </>
               )}
+                </div>
+              </div>
             </div>
           )}
         </section>

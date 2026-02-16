@@ -110,8 +110,9 @@ export default function App() {
 
   async function safeLoadProfile(userId) {
     const watchdog = setTimeout(() => {
+      console.warn("Profile loading timeout - stopping loading state");
       setLoadingProfile(false);
-    }, 65000);
+    }, 10000); // Faster timeout - 10 seconds
 
     try {
       await loadProfile(userId);
@@ -122,72 +123,54 @@ export default function App() {
 
   async function loadProfile(userId) {
     setLoadingProfile(true);
+    const startTime = Date.now();
+    
     try {
-      async function callWithRetry(fn, retries = 2, delayMs = 600) {
-        let lastErr;
-        for (let i = 0; i <= retries; i++) {
-          try {
-            return await fn();
-          } catch (err) {
-            lastErr = err;
-            if (i < retries) await new Promise((r) => setTimeout(r, delayMs * (i + 1)));
-          }
-        }
-        throw lastErr;
-      }
+      console.log(`[loadProfile] Starting for user: ${userId}`);
 
-      let result;
-      try {
-        result = await callWithRetry(() =>
-          withTimeoutAbort(
-            supabase
-              .from("profiles")
-              .select("role, full_name")
-              .eq("id", userId)
-              .maybeSingle(),
-            60000
-          )
-        );
-      } catch (err) {
-        console.warn("Profile query failed:", err?.message);
-        result = { data: null, error: err };
-      }
+      // Try to query profile with a reasonable timeout
+      const profileQuery = supabase
+        .from("profiles")
+        .select("role, full_name")
+        .eq("id", userId)
+        .maybeSingle();
 
-      const { data, error } = result;
+      const { data, error } = await Promise.race([
+        profileQuery,
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("Profile query timeout")), 5000)
+        ),
+      ]);
 
-      // If there's an error that's not "no rows", log it
-      if (error && error.code !== "PGRST116") {
-        console.error("loadProfile error:", error);
-      }
+      const elapsed = Date.now() - startTime;
+      console.log(`[loadProfile] Query completed in ${elapsed}ms`, { data, error: error?.message });
 
-      // Set role and fullName from profile if available
-      if (data) {
-        const normalizedRole = String(data.role ?? "user")
-          .trim()
-          .toLowerCase();
+      // If there's a legitimate error (not "no rows"), just use defaults
+      if (error) {
+        console.warn("[loadProfile] Query failed:", error?.message);
+        // Don't block - just use defaults
+        setRole("user");
+        setFullName("");
+      } else if (data) {
+        // Profile exists - use it
+        const normalizedRole = String(data.role ?? "user").trim().toLowerCase();
         setRole(normalizedRole);
         setFullName(data.full_name ?? "");
+        console.log(`[loadProfile] Profile loaded: role=${normalizedRole}, name=${data.full_name}`);
       } else {
-        // Profile doesn't exist or query failed - fall back to defaults
-        console.warn("Using default role=user (no profile found for:", userId);
+        // No profile found
+        console.warn(`[loadProfile] No profile row for user ${userId} - using defaults`);
         setRole("user");
         setFullName("");
       }
     } catch (e) {
-      if (e?.name === "AbortError") {
-        console.warn("loadProfile aborted (AbortError). Treating as timeout.");
-      } else if (e?.message && e.message.includes("timeout")) {
-        console.warn("loadProfile timeout:", e.message);
-      } else {
-        console.error("loadProfile error:", e);
-      }
-      try {
-        setSupabaseError(`loadProfile: ${e?.message || String(e)}`);
-      } catch (_) {}
+      console.error("[loadProfile] Exception:", e?.message);
+      // Don't show error, just use defaults
       setRole("user");
       setFullName("");
     } finally {
       setLoadingProfile(false);
+      console.log(`[loadProfile] Finished (elapsed: ${Date.now() - startTime}ms)`);
     }
   }
 

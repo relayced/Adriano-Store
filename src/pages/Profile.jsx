@@ -171,103 +171,95 @@ export default function Profile() {
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-10">
-      <h2 className="text-2xl font-bold">Profile</h2>
-      <p className="text-sm text-gray-600 mt-1">Account settings and details.</p>
+      <h2 className="text-2xl font-bold text-emerald-900">Profile</h2>
+      <p className="text-sm text-emerald-700 mt-1">Manage your account and preferences.</p>
 
       <div className="mt-6 grid grid-cols-1 md:grid-cols-[15rem_1fr] gap-6">
         <ProfileSidebar />
 
-        <section className="min-w-0 space-y-6">
-          {/* Account */}
-          <div className="border rounded-xl bg-white p-6">
-            <h3 className="text-lg font-semibold">Account</h3>
-
+        <section className="min-w-0">
+          <div className="border border-emerald-200 rounded-xl bg-emerald-50 p-6">
             {loading ? (
-              <p className="mt-4 text-gray-600">Loading…</p>
+              <p className="text-emerald-700">Loading…</p>
             ) : (
-              <div className="mt-4 space-y-4">
-                <div>
-                  <div className="text-xs text-gray-500">Email</div>
-                  <div className="text-sm font-semibold break-all">{email || "—"}</div>
+              <>
+                {/* Account Section */}
+                <div className="pb-4 border-b border-emerald-200">
+                  <h3 className="text-sm font-semibold text-emerald-900 mb-3">Account</h3>
+                  <div className="space-y-2">
+                    <div>
+                      <div className="text-xs text-emerald-700">Email</div>
+                      <div className="text-sm font-semibold text-emerald-900">{email || "—"}</div>
+                    </div>
+                    <button
+                      onClick={sendPasswordReset}
+                      className="mt-2 px-3 py-1.5 rounded-lg border border-emerald-300 bg-white text-emerald-700 hover:bg-emerald-100 text-xs transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+                      type="button"
+                    >
+                      Reset password
+                    </button>
+                  </div>
                 </div>
 
-                <div className="flex flex-wrap gap-2">
+                {/* Profile Details Section */}
+                <div className="py-4 border-b border-emerald-200">
+                  <h3 className="text-sm font-semibold text-emerald-900 mb-3">Personal Information</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs text-emerald-700 font-medium">Full name</label>
+                      <input
+                        value={fullName}
+                        onChange={(e) => setFullName(e.target.value)}
+                        className="mt-1.5 w-full border border-emerald-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                        placeholder="Your full name"
+                        disabled={loading}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-emerald-700 font-medium">Contact number</label>
+                      <input
+                        value={contactNumber}
+                        onChange={(e) => setContactNumber(e.target.value)}
+                        className="mt-1.5 w-full border border-emerald-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                        placeholder="09xx xxx xxxx"
+                        disabled={loading}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Shipping Address Section */}
+                <div className="pt-4">
+                  <h3 className="text-sm font-semibold text-emerald-900 mb-3">Delivery Address</h3>
+                  <label className="text-xs text-emerald-700 font-medium">Address</label>
+                  <textarea
+                    value={address}
+                    onChange={(e) => setAddress(e.target.value)}
+                    className="mt-1.5 w-full border border-emerald-200 rounded-lg px-3 py-2 text-sm min-h-20 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                    placeholder="House no., street, barangay, city, province"
+                    disabled={loading}
+                  />
+                  <p className="mt-1.5 text-xs text-emerald-700">
+                    Used for order deliveries
+                  </p>
+                </div>
+
+                {/* Actions */}
+                <div className="mt-6 flex items-center gap-2">
                   <button
-                    onClick={sendPasswordReset}
-                    className="px-4 py-2 rounded-lg border hover:bg-gray-50 text-sm"
+                    onClick={saveProfile}
+                    disabled={loading || saving}
+                    className="px-4 py-2 rounded-lg bg-emerald-700 text-white hover:bg-emerald-800 disabled:opacity-60 text-sm transition font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
                     type="button"
                   >
-                    Send password reset email
+                    {saving ? "Saving…" : "Save changes"}
                   </button>
                 </div>
 
-                <p className="text-xs text-gray-500">
-                  This will send a reset link to your email.
-                </p>
-              </div>
+                {msg && <p className="mt-3 text-sm text-emerald-700 font-medium">{msg}</p>}
+                {err && <p className="mt-3 text-sm text-red-600 font-medium">{err}</p>}
+              </>
             )}
-          </div>
-
-          {/* Profile details */}
-          <div className="border rounded-xl bg-white p-6">
-            <h3 className="text-lg font-semibold">Profile details</h3>
-
-            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="text-xs text-gray-500">Full name</label>
-                <input
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                  className="mt-1 w-full border rounded-lg px-3 py-2 text-sm"
-                  placeholder="Your full name"
-                  disabled={loading}
-                />
-              </div>
-
-              <div>
-                <label className="text-xs text-gray-500">Contact number</label>
-                <input
-                  value={contactNumber}
-                  onChange={(e) => setContactNumber(e.target.value)}
-                  className="mt-1 w-full border rounded-lg px-3 py-2 text-sm"
-                  placeholder="09xx xxx xxxx"
-                  disabled={loading}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Shipping address */}
-          <div className="border rounded-xl bg-white p-6">
-            <h3 className="text-lg font-semibold">Shipping address</h3>
-
-            <div className="mt-4">
-              <label className="text-xs text-gray-500">Address</label>
-              <textarea
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-                className="mt-1 w-full border rounded-lg px-3 py-2 text-sm min-h-27.5"
-                placeholder="House no., street, barangay, city, province"
-                disabled={loading}
-              />
-              <p className="mt-2 text-xs text-gray-500">
-                This will be used as your default delivery address.
-              </p>
-            </div>
-
-            <div className="mt-4 flex items-center gap-2">
-              <button
-                onClick={saveProfile}
-                disabled={loading || saving}
-                className="px-4 py-2 rounded-lg bg-black text-white hover:opacity-90 disabled:opacity-60 text-sm"
-                type="button"
-              >
-                {saving ? "Saving…" : "Save changes"}
-              </button>
-            </div>
-
-            {msg && <p className="mt-3 text-sm text-green-700">{msg}</p>}
-            {err && <p className="mt-3 text-sm text-red-600">{err}</p>}
           </div>
         </section>
       </div>

@@ -90,13 +90,13 @@ export default function ProfileSidebar() {
   }
 
   return (
-    <aside className="border rounded-xl bg-white p-4 w-full max-w-xs">
+    <aside className="border border-emerald-200 rounded-xl bg-emerald-50 p-4 w-full max-w-xs">
       <div className="mb-3">
-        <div className="text-xs text-gray-500">Signed in as</div>
-        <div className="text-sm font-semibold break-all">{email}</div>
+        <div className="text-xs text-emerald-700">Signed in as</div>
+        <div className="text-sm font-semibold break-all text-emerald-900">{email}</div>
 
         {isAdmin && (
-          <span className="inline-block mt-2 text-xs px-2 py-0.5 rounded-full bg-black text-white">
+          <span className="inline-block mt-2 text-xs px-2 py-0.5 rounded-full bg-emerald-700 text-white">
             Admin
           </span>
         )}
@@ -107,8 +107,8 @@ export default function ProfileSidebar() {
           <Link
             key={l.to}
             to={l.to}
-            className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm border ${
-              isActive(l.to) ? "bg-black text-white border-black" : "hover:bg-gray-50"
+            className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm border transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 ${
+              isActive(l.to) ? "bg-emerald-700 text-white border-emerald-700" : "border-emerald-200 text-emerald-700 hover:bg-emerald-100"
             }`}
           >
             <span className="flex items-center gap-2">
@@ -117,7 +117,7 @@ export default function ProfileSidebar() {
             </span>
 
             {l.badge && (
-              <span className={`text-xs px-2 py-0.5 rounded-full ${isActive(l.to) ? "bg-white/20" : "bg-black text-white"}`}>
+              <span className={`text-xs px-2 py-0.5 rounded-full ${isActive(l.to) ? "bg-white/20" : "bg-emerald-200 text-emerald-900"}`}>
                 {l.badge}
               </span>
             )}
@@ -127,8 +127,8 @@ export default function ProfileSidebar() {
         {isAdmin && (
           <Link
             to="/admin"
-            className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm border ${
-              isActive("/admin") ? "bg-black text-white border-black" : "hover:bg-gray-50"
+            className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm border transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 ${
+              isActive("/admin") ? "bg-emerald-700 text-white border-emerald-700" : "border-emerald-200 text-emerald-700 hover:bg-emerald-100"
             }`}
           >
             🛠️ Admin
@@ -136,7 +136,7 @@ export default function ProfileSidebar() {
         )}
       </nav>
 
-      <button onClick={logout} className="mt-4 w-full px-3 py-2 text-sm rounded-lg border hover:bg-gray-50">
+      <button onClick={logout} className="mt-4 w-full px-3 py-2 text-sm rounded-lg border border-emerald-200 text-emerald-700 hover:bg-emerald-100 transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2">
         Log out
       </button>
     </aside>

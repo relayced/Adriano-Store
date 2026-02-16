@@ -25,6 +25,12 @@ export default function Products({ session }) {
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
+  
+  // Modal and Buy Now states
+  const [buyNowProduct, setBuyNowProduct] = useState(null);
+  const [buyNowQty, setBuyNowQty] = useState(1);
+  const [buyNowOpen, setBuyNowOpen] = useState(false);
+  const [toast, setToast] = useState({ message: "", visible: false });
 
   async function loadProducts() {
     setLoading(true);
@@ -99,8 +105,39 @@ export default function Products({ session }) {
 
     setCart(cart);
 
-    // ✅ If user clicked BUY, open cart checkout with full details UI
-    navigate(goToCheckout ? "/cart?checkout=1" : "/cart");
+    // Show toast instead of redirecting
+    setToast({ message: `Added to cart`, visible: true });
+    setTimeout(() => setToast({ message: "", visible: false }), 2000);
+  }
+
+  function openBuyNow(product) {
+    if (!session) return navigate("/login");
+    setBuyNowProduct(product);
+    setBuyNowQty(1);
+    setBuyNowOpen(true);
+  }
+
+  function confirmBuyNow() {
+    if (!buyNowProduct) return;
+    
+    const cart = getCart();
+    const idx = cart.findIndex((x) => x.product_id === buyNowProduct.id);
+
+    if (idx >= 0) {
+      cart[idx].qty += Number(buyNowQty);
+    } else {
+      cart.push({
+        product_id: buyNowProduct.id,
+        name: buyNowProduct.name,
+        price: Number(buyNowProduct.price || 0),
+        qty: Number(buyNowQty),
+        image_url: buyNowProduct.image_url || null,
+      });
+    }
+
+    setCart(cart);
+    setBuyNowOpen(false);
+    navigate("/cart?checkout=1");
   }
 
   const categories = useMemo(() => {
@@ -133,7 +170,7 @@ export default function Products({ session }) {
 
         <button
           onClick={loadProducts}
-          className="px-4 py-2 text-sm rounded-lg border border-emerald-900/20 text-emerald-700 hover:bg-emerald-50 transition w-fit"
+          className="px-4 py-2 text-sm rounded-lg border border-emerald-900/20 text-emerald-700 hover:bg-emerald-50 transition w-fit focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
         >
           Refresh
         </button>
@@ -220,15 +257,25 @@ export default function Products({ session }) {
                     <div className="text-xs text-gray-500">{stock > 0 ? `${stock} left` : "Out"}</div>
                   </div>
 
-                  {/* Add to Cart Button */}
-                  <button
-                    onClick={() => addToCart(p)}
-                    disabled={stock === 0}
-                    className="mt-3 w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-lg font-bold hover:bg-emerald-200 disabled:opacity-50 disabled:cursor-not-allowed transition mx-auto"
-                    title={stock > 0 ? "Add to cart" : "Out of stock"}
-                  >
-                    +
-                  </button>
+                  {/* Action Buttons */}
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      onClick={() => addToCart(p)}
+                      disabled={stock === 0}
+                      className="flex-1 px-3 py-2 rounded-lg bg-emerald-100 text-emerald-700 text-sm font-medium hover:bg-emerald-200 disabled:opacity-50 disabled:cursor-not-allowed transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+                      title={stock > 0 ? "Add to cart" : "Out of stock"}
+                    >
+                      Add
+                    </button>
+                    <button
+                      onClick={() => openBuyNow(p)}
+                      disabled={stock === 0}
+                      className="flex-1 px-3 py-2 rounded-lg bg-emerald-700 text-white text-sm font-medium hover:bg-emerald-800 disabled:opacity-50 disabled:cursor-not-allowed transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+                      title={stock > 0 ? "Buy now" : "Out of stock"}
+                    >
+                      Buy
+                    </button>
+                  </div>
                 </div>
               </div>
             );
@@ -239,6 +286,132 @@ export default function Products({ session }) {
               <p className="text-gray-600 text-sm">No products found.</p>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Toast Notification */}
+      {toast.visible && (
+        <div className="fixed bottom-6 right-6 bg-emerald-700 text-white px-6 py-3 rounded-lg shadow-lg z-40">
+          {toast.message}
+        </div>
+      )}
+
+      {/* Buy Now Modal */}
+      {buyNowOpen && buyNowProduct && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+          <div className="w-full max-w-md bg-white rounded-2xl border border-emerald-200 shadow-lg overflow-hidden">
+            {/* Modal Header */}
+            <div className="p-5 border-b border-emerald-200 bg-emerald-50 flex items-center justify-between">
+              <div className="text-lg font-semibold text-emerald-900">Order Summary</div>
+              <button
+                onClick={() => setBuyNowOpen(false)}
+                className="text-2xl text-emerald-700 hover:text-emerald-900"
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-5 space-y-4">
+              {/* Product Image */}
+              <div className="w-full h-48 bg-emerald-50 rounded-lg overflow-hidden flex items-center justify-center">
+                {buyNowProduct.image_url ? (
+                  <img
+                    src={buyNowProduct.image_url}
+                    alt={buyNowProduct.name}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <span className="text-gray-400">No image</span>
+                )}
+              </div>
+
+              {/* Product Info */}
+              <div>
+                <div className="font-bold text-lg text-emerald-900">{buyNowProduct.name}</div>
+                <div className="text-sm text-emerald-700 mt-1">{buyNowProduct.description || "—"}</div>
+              </div>
+
+              {/* Quantity Selector */}
+              <div className="border border-emerald-200 rounded-lg p-3 bg-emerald-50">
+                <label className="text-xs text-emerald-700 font-medium">Quantity</label>
+                <div className="mt-2 flex items-center gap-3">
+                  <button
+                    onClick={() => setBuyNowQty(Math.max(1, buyNowQty - 1))}
+                    className="px-3 py-1 rounded border border-emerald-300 text-emerald-700 hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    −
+                  </button>
+                  <input
+                    type="number"
+                    min="1"
+                    max={Number(buyNowProduct.stock || 1)}
+                    value={buyNowQty}
+                    onChange={(e) => setBuyNowQty(Math.max(1, Number(e.target.value)))}
+                    className="w-16 border border-emerald-200 rounded px-2 py-1 text-center focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                  <button
+                    onClick={() => setBuyNowQty(Math.min(Number(buyNowProduct.stock || 1), buyNowQty + 1))}
+                    className="px-3 py-1 rounded border border-emerald-300 text-emerald-700 hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+
+              {/* Price Summary */}
+              <div className="border-t border-emerald-200 pt-3 space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-emerald-700">Subtotal</span>
+                  <span className="font-semibold text-emerald-900">₱{(Number(buyNowProduct.price || 0) * buyNowQty).toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-emerald-700">Shipping</span>
+                  <span className="text-emerald-700">Calculated at checkout</span>
+                </div>
+                <div className="flex justify-between text-lg font-bold border-t border-emerald-200 pt-2">
+                  <span className="text-emerald-900">Total</span>
+                  <span className="text-emerald-700">₱{(Number(buyNowProduct.price || 0) * buyNowQty).toFixed(2)}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="p-5 border-t border-emerald-200 bg-emerald-50 flex gap-3">
+              <button
+                onClick={() => {
+                  if (buyNowProduct) {
+                    const cart = getCart();
+                    const idx = cart.findIndex((x) => x.product_id === buyNowProduct.id);
+                    if (idx >= 0) {
+                      cart[idx].qty += Number(buyNowQty);
+                    } else {
+                      cart.push({
+                        product_id: buyNowProduct.id,
+                        name: buyNowProduct.name,
+                        price: Number(buyNowProduct.price || 0),
+                        qty: Number(buyNowQty),
+                        image_url: buyNowProduct.image_url || null,
+                      });
+                    }
+                    setCart(cart);
+                    setToast({ message: `Added to cart`, visible: true });
+                    setTimeout(() => setToast({ message: "", visible: false }), 2000);
+                  }
+                  setBuyNowOpen(false);
+                }}
+                className="flex-1 px-4 py-2 rounded-lg bg-emerald-100 text-emerald-700 font-medium hover:bg-emerald-200 transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+              >
+                Cart
+              </button>
+              <button
+                onClick={confirmBuyNow}
+                className="flex-1 px-4 py-2 rounded-lg bg-emerald-700 text-white font-medium hover:bg-emerald-800 transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+              >
+                Confirm Order
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </main>

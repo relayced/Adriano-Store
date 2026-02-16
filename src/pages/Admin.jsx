@@ -205,10 +205,19 @@ export default function Admin() {
   async function refreshUsers() {
     try {
       setULoading(true);
-      const { data, error } = await supabase
+      setMsg("");
+      
+      const timeoutMs = 5000;
+      const timeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Query timeout")), timeoutMs)
+      );
+
+      const query = supabase
         .from("profiles")
         .select("id, role, full_name, contact_number, address, created_at")
         .order("created_at", { ascending: false });
+
+      const { data, error } = await Promise.race([query, timeout]);
 
       if (error) throw error;
 
@@ -227,8 +236,8 @@ export default function Admin() {
       setProfileNameById(mapName);
       setProfilesById(mapFull);
     } catch (e) {
-      console.error(e);
-      setMsg(e.message);
+      console.error("refreshUsers error:", e);
+      setMsg(e.message || "Failed to load users");
     } finally {
       setULoading(false);
     }
@@ -429,12 +438,30 @@ export default function Admin() {
     setMsg("");
     try {
       const nextRole = makeAdmin ? "admin" : "user";
-      const { error } = await supabase.from("profiles").update({ role: nextRole }).eq("id", userId);
+      
+      const timeoutMs = 5000;
+      const timeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Update timeout")), timeoutMs)
+      );
+
+      const updateQuery = supabase
+        .from("profiles")
+        .update({ role: nextRole })
+        .eq("id", userId);
+
+      const { error } = await Promise.race([updateQuery, timeout]);
+
       if (error) throw error;
-      refreshUsers();
+
+      console.log(`User ${userId} role updated to ${nextRole}`);
+      
+      // Refresh the users list to show updated role
+      await refreshUsers();
+      
+      setMsg(`User role changed to ${nextRole}`);
     } catch (e) {
-      console.error(e);
-      setMsg(e.message);
+      console.error("toggleAdmin error:", e);
+      setMsg(e.message || "Failed to update user role");
     }
   }
 

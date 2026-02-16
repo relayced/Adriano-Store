@@ -133,7 +133,7 @@ export default function Checkout() {
           <div className="flex items-center gap-3">
             <label className="text-sm text-gray-600">Qty</label>
             <input
-              className="w-24 border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-black/10"
+              className="w-24 border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
               type="number"
               min={1}
               max={product.stock ?? 1}
