@@ -17,6 +17,13 @@ export default function Signup() {
   async function handleSignup(e) {
     e.preventDefault();
     setMsg("");
+
+    // Validate Gmail only
+    if (!email.endsWith("@gmail.com")) {
+      setMsg("Please use a Gmail address (@gmail.com)");
+      return;
+    }
+
     setBusy(true);
 
     try {
@@ -99,6 +106,7 @@ export default function Signup() {
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
                 placeholder="Your name"
+                required
               />
             </div>
 
@@ -109,6 +117,7 @@ export default function Signup() {
                 value={contactNumber}
                 onChange={(e) => setContactNumber(e.target.value)}
                 placeholder="09xxxxxxxxx"
+                required
               />
             </div>
 
@@ -119,6 +128,7 @@ export default function Signup() {
                 value={address}
                 onChange={(e) => setAddress(e.target.value)}
                 placeholder="House/Street, Barangay, City, Province"
+                required
               />
             </div>
 
@@ -128,7 +138,10 @@ export default function Signup() {
                 className="w-full border border-emerald-900/20 rounded-xl px-4 py-2 outline-none focus:ring-2 focus:ring-emerald-600 transition"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@email.com"
+                placeholder="you@gmail.com"
+                type="email"
+                pattern=".*@gmail\.com$"
+                title="Please use a Gmail address (@gmail.com)"
                 autoComplete="email"
                 required
               />

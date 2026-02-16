@@ -91,10 +91,6 @@ export default function Cart() {
   const [gcashReference, setGcashReference] = useState("");
   const [uploadingProof, setUploadingProof] = useState(false);
 
-  // Your own GCash details (display only)
-  const GCASH_NAME = "Ralph Denver Dimapilis";
-  const GCASH_NUMBER = "0936 717 4070";
-
   function setItems(next) {
     setItemsState(next);
     setCart(next);
@@ -670,10 +666,15 @@ export default function Cart() {
                         onClick={useMyLocation}
                         className="px-4 py-2 rounded-lg bg-white border border-emerald-300 text-sm text-emerald-700 hover:bg-emerald-100 transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
                       >
-                        📍 Use my location
+                        Use my location
                       </button>
                       {locStatus && (
                         <div className="mt-2 text-sm text-emerald-700">{locStatus}</div>
+                      )}
+                      {shippingMode === "gps" && distanceKm == null && (
+                        <div className="mt-3 p-3 rounded-lg bg-amber-100 border border-amber-300">
+                          <p className="text-sm text-amber-800 font-medium">⚠️ Please click "Use my location" to calculate shipping cost, or switch to Shipping Zone.</p>
+                        </div>
                       )}
                     </div>
 
@@ -733,10 +734,8 @@ export default function Cart() {
                       <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm">
                         <div className="font-semibold text-emerald-900">GCash Payment Instructions</div>
                         <div className="mt-2 text-emerald-900">
-                          Send payment to:
+                          Contact the store for GCash payment details.
                           <div className="mt-2 text-sm">
-                            <div><b>Name:</b> {GCASH_NAME}</div>
-                            <div><b>Number:</b> {GCASH_NUMBER}</div>
                             <div><b>Amount:</b> {money(grandTotal)}</div>
                           </div>
                         </div>
