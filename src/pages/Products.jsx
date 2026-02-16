@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "../supabaseClient";
 
-const DEFAULT_CATEGORIES = ["All", "Notebooks", "Writing", "Accessories", "Paintings"];
+const DEFAULT_CATEGORIES = ["All", "Notebooks", "Pens", "Pencils", "Paper", "Accessories", "Paintings"];
 
 function getCart() {
   try {

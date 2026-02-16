@@ -4,6 +4,7 @@ import { supabase } from "../supabaseClient";
 
 const ORDER_STATUSES = ["placed", "Pending", "Paid", "Shipped", "Completed", "Cancelled"];
 const PRODUCT_IMG_BUCKET = "product-images";
+const DEFAULT_CATEGORIES = ["Notebooks", "Pens", "Pencils", "Paper", "Accessories", "Paintings"];
 
 function money(n) {
   return `₱${Number(n || 0).toFixed(2)}`;
@@ -58,6 +59,28 @@ function orderAddress(o) {
   return typeof v === "string" ? v : "";
 }
 
+function normalizeItems(items) {
+  if (!items) return [];
+  if (Array.isArray(items)) return items;
+  if (typeof items === "string") {
+    try {
+      const parsed = JSON.parse(items);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function getProductNamesFor(o) {
+  const items = normalizeItems(o?.items);
+  if (items.length === 0) return "No items";
+  const names = items.map(item => item.name || "Item").slice(0, 2);
+  const displayStr = names.join(", ");
+  return items.length > 2 ? `${displayStr} +${items.length - 2} more` : displayStr;
+}
+
 function UserIcon() {
   return (
     <svg
@@ -78,7 +101,7 @@ export default function Admin() {
   const nav = useNavigate();
 
   const [tab, setTab] = useState("products"); // products | orders | users
-  const [msg, setMsg] = useState("");
+  const [msg, setMsg] = useState({ type: "", text: "" });
 
   // auth + role
   const [loading, setLoading] = useState(true);
@@ -94,7 +117,7 @@ export default function Admin() {
     name: "",
     description: "",
     price: "",
-    category: "Notebooks",
+    category: "",
     stock: "0",
     image_url: "",
   });
@@ -134,7 +157,7 @@ export default function Admin() {
     (async () => {
       try {
         setLoading(true);
-        setMsg("");
+        setMsg({ type: "", text: "" });
 
         const { data: sess } = await supabase.auth.getSession();
         const session = sess?.session;
@@ -162,7 +185,7 @@ export default function Admin() {
         setIsAdmin(admin);
 
         if (!admin) {
-          setMsg("You are not authorized to view this page.");
+          setMsg({ type: "error", text: "You are not authorized to view this page." });
           return;
         }
 
@@ -237,7 +260,7 @@ export default function Admin() {
       setProfilesById(mapFull);
     } catch (e) {
       console.error("refreshUsers error:", e);
-      setMsg(e.message || "Failed to load users");
+      setMsg({ type: "error", text: e.message || "Failed to load users" });
     } finally {
       setULoading(false);
     }
@@ -329,7 +352,7 @@ export default function Admin() {
       name: p.name || "",
       description: p.description || "",
       price: String(p.price ?? ""),
-      category: p.category || "Notebooks",
+      category: p.category || "",
       stock: String(p.stock ?? "0"),
       image_url: p.image_url || "",
     });
@@ -347,7 +370,7 @@ export default function Admin() {
       name: "",
       description: "",
       price: "",
-      category: "Notebooks",
+      category: "",
       stock: "0",
       image_url: "",
     });
@@ -384,13 +407,13 @@ export default function Admin() {
         ? await supabase.from("products").update(payload).eq("id", editingProductId)
         : await supabase.from("products").insert(payload);
 
-      if (error) return setMsg(error.message);
+      if (error) return setMsg({ type: "error", text: error.message });
 
       setForm({
         name: "",
         description: "",
         price: "",
-        category: "Notebooks",
+        category: "",
         stock: "0",
         image_url: "",
       });
@@ -403,7 +426,7 @@ export default function Admin() {
 
       refreshProducts();
     } catch (err) {
-      setMsg(err?.message || "Failed to save product.");
+      setMsg({ type: "error", text: err?.message || "Failed to save product." });
     }
   }
 
@@ -423,45 +446,38 @@ export default function Admin() {
   }
 
   async function updateOrderStatus(orderId, status) {
-    setMsg("");
+    setMsg({ type: "", text: "" });
     try {
       const { error } = await supabase.from("orders").update({ status }).eq("id", orderId);
       if (error) throw error;
       refreshOrders();
     } catch (e) {
       console.error(e);
-      setMsg(e.message);
+      setMsg({ type: "error", text: e.message });
     }
   }
 
   async function toggleAdmin(userId, makeAdmin) {
-    setMsg("");
+    setMsg({ type: "", text: "" });
     try {
       const nextRole = makeAdmin ? "admin" : "user";
-      
-      const timeoutMs = 5000;
-      const timeout = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("Update timeout")), timeoutMs)
-      );
 
-      const updateQuery = supabase
+      const { error } = await supabase
         .from("profiles")
         .update({ role: nextRole })
         .eq("id", userId);
 
-      const { error } = await Promise.race([updateQuery, timeout]);
-
       if (error) throw error;
 
       console.log(`User ${userId} role updated to ${nextRole}`);
-      
+
       // Refresh the users list to show updated role
       await refreshUsers();
-      
-      setMsg(`User role changed to ${nextRole}`);
+
+      setMsg({ type: "success", text: `User role changed to ${nextRole}` });
     } catch (e) {
       console.error("toggleAdmin error:", e);
-      setMsg(e.message || "Failed to update user role");
+      setMsg({ type: "error", text: e.message || "Failed to update user role" });
     }
   }
 
@@ -499,6 +515,14 @@ export default function Admin() {
       );
     });
   }, [products, pSearch]);
+
+  const categories = useMemo(() => {
+    const dbCats = Array.from(
+      new Set(products.map((p) => p.category).filter(Boolean))
+    );
+    const allCats = Array.from(new Set([...DEFAULT_CATEGORIES, ...dbCats])).filter(c => c !== "Writing").sort();
+    return allCats;
+  }, [products]);
 
   const filteredOrders = useMemo(() => {
     const q = safeLower(oSearch).trim();
@@ -673,12 +697,11 @@ export default function Admin() {
                     onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
                     className="mt-1 w-full px-3 py-2 rounded-lg border bg-white"
                   >
-                    <option>Notebooks</option>
-                    <option>Pens</option>
-                    <option>Pencils</option>
-                    <option>Paper</option>
-                    <option>Accessories</option>
-                    <option>Other</option>
+                    {categories.filter(c => c !== "All").map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
@@ -728,7 +751,13 @@ export default function Admin() {
                   )}
                 </div>
 
-                {msg && <p className="text-sm text-red-600">{msg}</p>}
+                {msg.text && (
+                  <p className={`text-sm font-semibold ${
+                    msg.type === "success" ? "text-green-600" : "text-red-600"
+                  }`}>
+                    {msg.text}
+                  </p>
+                )}
               </form>
             </div>
 
@@ -833,8 +862,8 @@ export default function Admin() {
                     <div className="p-4 border-b bg-gray-50/60">
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
-                          <div className="text-xs text-gray-500">Order ID</div>
-                          <div className="font-semibold text-gray-900 truncate">#{o.id}</div>
+                          <div className="text-xs text-gray-500">Products</div>
+                          <div className="font-semibold text-gray-900 truncate">{getProductNamesFor(o)}</div>
                         </div>
                         <span className="shrink-0 text-xs px-2 py-1 rounded-full border bg-white text-gray-700">
                           {o.status || "placed"}
@@ -971,7 +1000,13 @@ export default function Admin() {
                   </tbody>
                 </table>
 
-                {msg && <p className="mt-3 text-sm text-red-600">{msg}</p>}
+                {msg.text && (
+                  <p className={`mt-3 text-sm font-semibold ${
+                    msg.type === "success" ? "text-green-600" : "text-red-600"
+                  }`}>
+                    {msg.text}
+                  </p>
+                )}
               </div>
             )}
           </div>

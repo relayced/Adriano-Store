@@ -181,7 +181,7 @@ export default function Home({ session, fullName, role }) {
   async function fetchSlideshow() {
     setLoadingSlideshow(true);
     setSlideshowErr("");
-    setCurrentSlide(0);
+    if (allProducts.length > 0) setCurrentSlide(0);
 
     try {
       const timeoutMs = 60000;
@@ -242,10 +242,11 @@ export default function Home({ session, fullName, role }) {
 
   // Auto-advance slideshow every 5 seconds
   useEffect(() => {
-    if (allProducts.length === 0) return;
+    const slideshowProds = allProducts.slice(0, 12);
+    if (slideshowProds.length === 0) return;
 
     const interval = setInterval(() => {
-      setCurrentSlide((prev) => (prev + 1) % allProducts.length);
+      setCurrentSlide((prev) => (prev + 1) % slideshowProds.length);
     }, 5000);
 
     return () => clearInterval(interval);
@@ -335,7 +336,9 @@ export default function Home({ session, fullName, role }) {
     }
   }
 
-  const currentProduct = useMemo(() => allProducts[currentSlide] || null, [allProducts, currentSlide]);
+  const slideshowProducts = useMemo(() => allProducts.slice(0, 12), [allProducts]);
+
+  const currentProduct = useMemo(() => slideshowProducts[currentSlide] || null, [slideshowProducts, currentSlide]);
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-12 bg-white rounded-2xl mt-6 mb-6 shadow-sm">
@@ -405,18 +408,18 @@ export default function Home({ session, fullName, role }) {
                 {/* Slide Navigation */}
                 <div className="flex items-center justify-between gap-4 px-6 py-4 bg-emerald-50 border-t border-emerald-900/20">
                   <button
-                    onClick={() => setCurrentSlide((prev) => (prev - 1 + allProducts.length) % allProducts.length)}
+                    onClick={() => setCurrentSlide((prev) => (prev - 1 + slideshowProducts.length) % slideshowProducts.length)}
                     className="px-4 py-2 rounded-lg border border-emerald-900/20 hover:bg-emerald-100 text-emerald-700 transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
                   >
                     ← Previous
                   </button>
 
                   <div className="text-sm text-emerald-700 font-semibold">
-                    {currentSlide + 1} / {allProducts.length}
+                    {currentSlide + 1} / {slideshowProducts.length}
                   </div>
 
                   <button
-                    onClick={() => setCurrentSlide((prev) => (prev + 1) % allProducts.length)}
+                    onClick={() => setCurrentSlide((prev) => (prev + 1) % slideshowProducts.length)}
                     className="px-4 py-2 rounded-lg border border-emerald-900/20 hover:bg-emerald-100 text-emerald-700 transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
                   >
                     Next →
@@ -425,7 +428,7 @@ export default function Home({ session, fullName, role }) {
 
                 {/* Slide Indicators */}
                 <div className="flex justify-center gap-2 px-6 py-4 bg-white flex-wrap">
-                  {allProducts.map((_, i) => (
+                    {slideshowProducts.map((_, i) => (
                     <button
                       key={i}
                       onClick={() => setCurrentSlide(i)}
