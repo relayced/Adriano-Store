@@ -498,9 +498,143 @@ export default function Admin() {
     }
   }
 
-  async function updateOrderStatus(orderId, status, paymentMethod) {
+  function normalizeQty(value) {
+    const n = Number(value || 0);
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    return Math.floor(n);
+  }
+
+  function getItemProductId(item) {
+    const raw =
+      item?.product_id ??
+      item?.productId ??
+      item?.id ??
+      item?.product?.id ??
+      0;
+    const productId = Number(raw);
+    return Number.isFinite(productId) && productId > 0 ? productId : 0;
+  }
+
+  function getItemQty(item) {
+    return normalizeQty(item?.qty ?? item?.quantity ?? item?.count ?? 0);
+  }
+
+  function addItemToQtyMap(map, item) {
+    const productId = getItemProductId(item);
+    const qty = getItemQty(item);
+    if (productId <= 0 || qty <= 0) return;
+    map[productId] = (map[productId] || 0) + qty;
+  }
+
+  async function collectOrderProductQty(order) {
+    const qtyByProductId = {};
+
+    const orderItems = normalizeItems(order?.items);
+    for (const item of orderItems) addItemToQtyMap(qtyByProductId, item);
+
+    if (Object.keys(qtyByProductId).length > 0) return qtyByProductId;
+
+    const orderId = Number(order?.id || 0);
+    if (!Number.isFinite(orderId) || orderId <= 0) return qtyByProductId;
+
+    const { data: orderItemsRows, error: orderItemsErr } = await supabase
+      .from("order_items")
+      .select("product_id, qty, quantity")
+      .eq("order_id", orderId);
+
+    if (orderItemsErr) {
+      throw orderItemsErr;
+    }
+
+    for (const item of orderItemsRows || []) addItemToQtyMap(qtyByProductId, item);
+
+    return qtyByProductId;
+  }
+
+  async function restoreStocksForOrder(order) {
+    const qtyByProductId = await collectOrderProductQty(order);
+
+    const productIds = Object.keys(qtyByProductId).map(Number).filter((id) => id > 0);
+    if (!productIds.length) return;
+
+    const { data: rows, error: readErr } = await supabase
+      .from("products")
+      .select("id, stock")
+      .in("id", productIds);
+
+    if (readErr) throw readErr;
+
+    const updates = (rows || []).map((product) => {
+      const restoreQty = Number(qtyByProductId[Number(product.id)] || 0);
+      if (restoreQty <= 0) return Promise.resolve({ error: null });
+
+      return supabase
+        .from("products")
+        .update({ stock: Number(product.stock || 0) + restoreQty })
+        .eq("id", product.id);
+    });
+
+    const results = await Promise.all(updates);
+    const failed = results.find((r) => r?.error);
+    if (failed?.error) throw failed.error;
+  }
+
+  async function deductStocksForOrder(order) {
+    const qtyByProductId = await collectOrderProductQty(order);
+
+    const productIds = Object.keys(qtyByProductId).map(Number).filter((id) => id > 0);
+    if (!productIds.length) return;
+
+    const { data: rows, error: readErr } = await supabase
+      .from("products")
+      .select("id, stock")
+      .in("id", productIds);
+
+    if (readErr) throw readErr;
+
+    for (const product of rows || []) {
+      const deductQty = Number(qtyByProductId[Number(product.id)] || 0);
+      if (deductQty <= 0) continue;
+      const currentStock = Number(product.stock || 0);
+      if (currentStock < deductQty) {
+        throw new Error(`Not enough stock to complete this order. Product ID: ${product.id}`);
+      }
+    }
+
+    const updates = (rows || []).map((product) => {
+      const deductQty = Number(qtyByProductId[Number(product.id)] || 0);
+      if (deductQty <= 0) return Promise.resolve({ error: null });
+
+      return supabase
+        .from("products")
+        .update({ stock: Number(product.stock || 0) - deductQty })
+        .eq("id", product.id);
+    });
+
+    const results = await Promise.all(updates);
+    const failed = results.find((r) => r?.error);
+    if (failed?.error) throw failed.error;
+  }
+
+  async function updateOrderStatus(order, status, paymentMethod) {
     setMsg({ type: "", text: "" });
     try {
+      const orderId = order?.id;
+      if (!orderId) return;
+
+      const currentStatus = normalizeOrderStatus(order?.status);
+      const nextStatus = normalizeOrderStatus(status);
+
+      const shouldRestoreStocks = currentStatus !== "Cancelled" && nextStatus === "Cancelled";
+      if (shouldRestoreStocks) {
+        await restoreStocksForOrder(order);
+      }
+
+      const shouldDeductStocks = currentStatus === "Cancelled" && nextStatus !== "Cancelled";
+      if (shouldDeductStocks) {
+        await deductStocksForOrder(order);
+      }
+
       const payload = { status };
       const method = String(paymentMethod || "").toLowerCase();
 
@@ -510,7 +644,8 @@ export default function Admin() {
 
       const { error } = await supabase.from("orders").update(payload).eq("id", orderId);
       if (error) throw error;
-      refreshOrders();
+
+      await Promise.all([refreshOrders(), refreshProducts()]);
     } catch (e) {
       console.error(e);
       setMsg({ type: "error", text: e.message });
@@ -1215,7 +1350,7 @@ export default function Admin() {
                         <div className="text-sm text-gray-700 font-medium mb-2">Status</div>
                         <select
                           value={normalizeOrderStatus(o.status)}
-                          onChange={(e) => updateOrderStatus(o.id, e.target.value, o.payment_method)}
+                          onChange={(e) => updateOrderStatus(o, e.target.value, o.payment_method)}
                           className="w-full px-3 py-2 rounded-lg border bg-white"
                         >
                           {ORDER_STATUSES.map((s) => (
