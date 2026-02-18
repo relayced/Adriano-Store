@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../supabaseClient";
 
-const ORDER_STATUSES = ["placed", "Pending", "Paid", "Shipped", "Completed", "Cancelled"];
+const ORDER_STATUSES = ["To Ship", "Out for Delivery", "Completed", "Cancelled"];
 const PRODUCT_IMG_BUCKET = "product-images";
 const DEFAULT_CATEGORIES = ["Notebooks", "Pens", "Pencils", "Paper", "Accessories", "Paintings"];
 
@@ -59,6 +59,43 @@ function orderAddress(o) {
   return typeof v === "string" ? v : "";
 }
 
+function extractBarangay(address) {
+  const raw = String(address || "").trim();
+  if (!raw) return "Unknown";
+
+  const parts = raw
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
+
+  const matched = parts.find((part) => /barangay|brgy\.?/i.test(part));
+  const source = matched || parts[1] || parts[0] || "Unknown";
+
+  return source
+    .replace(/^barangay\s*/i, "")
+    .replace(/^brgy\.?\s*/i, "")
+    .trim() || "Unknown";
+}
+
+function normalizeOrderStatus(status) {
+  const s = String(status || "").trim().toLowerCase();
+  if (s === "cancelled" || s === "canceled") return "Cancelled";
+  if (s === "completed") return "Completed";
+  if (s === "ship" || s === "shipped" || s === "delivering" || s === "out for delivery") {
+    return "Out for Delivery";
+  }
+  return "To Ship";
+}
+
+function paymentStatusLabel(order) {
+  const method = String(order?.payment_method || "").toLowerCase();
+  const status = String(order?.status || "").toLowerCase();
+  if (method.includes("gcash")) return "Paid";
+  if (method.includes("cod") && status === "completed") return "Paid";
+  if (method.includes("cod")) return "Pending";
+  return "Unpaid";
+}
+
 function normalizeItems(items) {
   if (!items) return [];
   if (Array.isArray(items)) return items;
@@ -81,26 +118,10 @@ function getProductNamesFor(o) {
   return items.length > 2 ? `${displayStr} +${items.length - 2} more` : displayStr;
 }
 
-function UserIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-      className="h-4 w-4 text-gray-700"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-    >
-      <path d="M20 21a8 8 0 0 0-16 0" />
-      <circle cx="12" cy="8" r="4" />
-    </svg>
-  );
-}
-
 export default function Admin() {
   const nav = useNavigate();
 
-  const [tab, setTab] = useState("products"); // products | orders | users
+  const [tab, setTab] = useState("products"); // products | orders | users | sales
   const [msg, setMsg] = useState({ type: "", text: "" });
 
   // auth + role
@@ -112,6 +133,7 @@ export default function Admin() {
   const [products, setProducts] = useState([]);
   const [pLoading, setPLoading] = useState(false);
   const [pSearch, setPSearch] = useState("");
+  const [lowStockOnly, setLowStockOnly] = useState(false);
 
   const [form, setForm] = useState({
     name: "",
@@ -144,7 +166,12 @@ export default function Admin() {
   const [orders, setOrders] = useState([]);
   const [oLoading, setOLoading] = useState(false);
   const [oSearch, setOSearch] = useState("");
+  const [oCategory, setOCategory] = useState("All");
   const [viewOrder, setViewOrder] = useState(null);
+  const [salesProductCategory, setSalesProductCategory] = useState("All");
+  const [salesDateFrom, setSalesDateFrom] = useState("");
+  const [salesDateTo, setSalesDateTo] = useState("");
+  const [showBestBuysOnly, setShowBestBuysOnly] = useState(false);
 
   // users / profiles
   const [users, setUsers] = useState([]);
@@ -152,6 +179,8 @@ export default function Admin() {
   const [uSearch, setUSearch] = useState("");
   const [profileNameById, setProfileNameById] = useState({});
   const [profilesById, setProfilesById] = useState({});
+  const [userMenuOpen, setUserMenuOpen] = useState(null);
+  const [productMenuOpen, setProductMenuOpen] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -197,6 +226,22 @@ export default function Admin() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Close user menu on outside click
+  useEffect(() => {
+    if (!userMenuOpen && !productMenuOpen) return;
+    
+    function handleClick(e) {
+      // Close menu if clicking outside
+      if (!e.target.closest('button') && !e.target.closest('.user-menu-dropdown')) {
+        setUserMenuOpen(null);
+        setProductMenuOpen(null);
+      }
+    }
+    
+    document.addEventListener('click', handleClick);
+    return () => document.removeEventListener('click', handleClick);
+  }, [userMenuOpen, productMenuOpen]);
+
   async function refreshAll() {
     await Promise.all([refreshProducts(), refreshUsers(), refreshOrders()]);
   }
@@ -205,6 +250,7 @@ export default function Admin() {
     if (tab === "products") return refreshProducts();
     if (tab === "orders") return refreshOrders();
     if (tab === "users") return refreshUsers();
+    if (tab === "sales") return Promise.all([refreshProducts(), refreshOrders()]);
   }
 
   async function refreshProducts() {
@@ -237,7 +283,7 @@ export default function Admin() {
 
       const query = supabase
         .from("profiles")
-        .select("id, role, full_name, contact_number, address, created_at")
+        .select("id, role, full_name, email, banned, created_at")
         .order("created_at", { ascending: false });
 
       const { data, error } = await Promise.race([query, timeout]);
@@ -292,7 +338,7 @@ export default function Admin() {
       if (ids.length > 0) {
         const { data: profs, error: perr } = await supabase
           .from("profiles")
-          .select("id, full_name, contact_number, address")
+          .select("id, full_name, contact_number, barangay, address")
           .in("id", ids);
 
         if (!perr && Array.isArray(profs)) {
@@ -431,7 +477,14 @@ export default function Admin() {
   }
 
   async function removeProduct(id) {
-    if (!confirm("Delete this product?")) return;
+    setProductMenuOpen(null);
+    
+    // Find product name for confirmation
+    const product = products.find(p => p.id === id);
+    const productName = product?.name || "this product";
+    
+    if (!confirm(`Are you sure you want to delete "${productName}"? This action cannot be undone.`)) return;
+    
     setMsg("");
     try {
       const { error } = await supabase.from("products").delete().eq("id", id);
@@ -445,10 +498,17 @@ export default function Admin() {
     }
   }
 
-  async function updateOrderStatus(orderId, status) {
+  async function updateOrderStatus(orderId, status, paymentMethod) {
     setMsg({ type: "", text: "" });
     try {
-      const { error } = await supabase.from("orders").update({ status }).eq("id", orderId);
+      const payload = { status };
+      const method = String(paymentMethod || "").toLowerCase();
+
+      if (status === "Completed" && (method.includes("cod") || method.includes("gcash"))) {
+        payload.payment_status = "Paid";
+      }
+
+      const { error } = await supabase.from("orders").update(payload).eq("id", orderId);
       if (error) throw error;
       refreshOrders();
     } catch (e) {
@@ -459,6 +519,7 @@ export default function Admin() {
 
   async function toggleAdmin(userId, makeAdmin) {
     setMsg({ type: "", text: "" });
+    setUserMenuOpen(null);
     try {
       const nextRole = makeAdmin ? "admin" : "user";
 
@@ -478,6 +539,47 @@ export default function Admin() {
     } catch (e) {
       console.error("toggleAdmin error:", e);
       setMsg({ type: "error", text: e.message || "Failed to update user role" });
+    }
+  }
+
+  async function banUser(userId) {
+    setMsg({ type: "", text: "" });
+    setUserMenuOpen(null);
+    if (!confirm("Are you sure you want to ban this user? They will not be able to log in.")) {
+      return;
+    }
+    try {
+      const { error } = await supabase
+        .from("profiles")
+        .update({ banned: true })
+        .eq("id", userId);
+
+      if (error) throw error;
+
+      await refreshUsers();
+      setMsg({ type: "success", text: "User banned successfully" });
+    } catch (e) {
+      console.error("banUser error:", e);
+      setMsg({ type: "error", text: e.message || "Failed to ban user" });
+    }
+  }
+
+  async function unbanUser(userId) {
+    setMsg({ type: "", text: "" });
+    setUserMenuOpen(null);
+    try {
+      const { error } = await supabase
+        .from("profiles")
+        .update({ banned: false })
+        .eq("id", userId);
+
+      if (error) throw error;
+
+      await refreshUsers();
+      setMsg({ type: "success", text: "User unbanned successfully" });
+    } catch (e) {
+      console.error("unbanUser error:", e);
+      setMsg({ type: "error", text: e.message || "Failed to unban user" });
     }
   }
 
@@ -506,15 +608,20 @@ export default function Admin() {
 
   const filteredProducts = useMemo(() => {
     const q = safeLower(pSearch).trim();
-    if (!q) return products;
     return products.filter((p) => {
-      return (
+      const textOk =
         safeLower(p.name).includes(q) ||
         safeLower(p.description).includes(q) ||
-        safeLower(p.category).includes(q)
-      );
+        safeLower(p.category).includes(q);
+      const stockOk = !lowStockOnly || Number(p.stock || 0) <= 5;
+      return (q ? textOk : true) && stockOk;
     });
-  }, [products, pSearch]);
+  }, [products, pSearch, lowStockOnly]);
+
+  const lowStockCount = useMemo(
+    () => products.filter((p) => Number(p.stock || 0) <= 5).length,
+    [products]
+  );
 
   const categories = useMemo(() => {
     const dbCats = Array.from(
@@ -526,21 +633,26 @@ export default function Admin() {
 
   const filteredOrders = useMemo(() => {
     const q = safeLower(oSearch).trim();
-    if (!q) return orders;
 
     return orders.filter((o) => {
+      const status = normalizeOrderStatus(o?.status);
+      const categoryOk = oCategory === "All" || status === oCategory;
+      if (!categoryOk) return false;
+
+      if (!q) return true;
+
       const name = safeLower(resolvedOrderName(o));
       const phone = safeLower(resolvedOrderPhone(o));
       const addr = safeLower(resolvedOrderAddress(o));
       return (
-        safeLower(o?.status).includes(q) ||
+        safeLower(status).includes(q) ||
         name.includes(q) ||
         phone.includes(q) ||
         addr.includes(q) ||
         String(o?.id).includes(q)
       );
     });
-  }, [orders, oSearch, profileNameById, profilesById]);
+  }, [orders, oSearch, oCategory, profileNameById, profilesById]);
 
   const filteredUsers = useMemo(() => {
     const q = safeLower(uSearch).trim();
@@ -550,12 +662,147 @@ export default function Admin() {
         safeLower(u.name).includes(q) ||
         safeLower(u.full_name).includes(q) ||
         safeLower(u.role).includes(q) ||
-        safeLower(u.contact_number).includes(q) ||
-        safeLower(u.address).includes(q) ||
+        safeLower(u.email).includes(q) ||
         String(u.id).includes(q)
       );
     });
   }, [users, uSearch]);
+
+  const productById = useMemo(() => {
+    const map = {};
+    for (const product of products) {
+      map[Number(product.id)] = product;
+    }
+    return map;
+  }, [products]);
+
+  const salesOrders = useMemo(
+    () => orders.filter((o) => normalizeOrderStatus(o?.status) === "Completed"),
+    [orders]
+  );
+
+  const isWithinSalesDateRange = (order) => {
+    if (!order?.created_at) return false;
+    const orderDate = new Date(order.created_at);
+    if (Number.isNaN(orderDate.getTime())) return false;
+
+    if (salesDateFrom) {
+      const fromDate = new Date(`${salesDateFrom}T00:00:00`);
+      if (orderDate < fromDate) return false;
+    }
+
+    if (salesDateTo) {
+      const toDate = new Date(`${salesDateTo}T23:59:59.999`);
+      if (orderDate > toDate) return false;
+    }
+
+    return true;
+  };
+
+  const filteredSalesOrders = useMemo(() => {
+    return salesOrders.filter((order) => isWithinSalesDateRange(order));
+  }, [salesOrders, salesDateFrom, salesDateTo]);
+
+  const salesIncome = useMemo(
+    () => filteredSalesOrders.reduce((sum, order) => sum + Number(order.total || 0), 0),
+    [filteredSalesOrders]
+  );
+
+  const totalShippingFee = useMemo(
+    () => filteredSalesOrders.reduce((sum, order) => sum + Number(order.shipping_fee || 0), 0),
+    [filteredSalesOrders]
+  );
+
+  const salesByDay = useMemo(() => {
+    const dayMap = {};
+    for (const order of filteredSalesOrders) {
+      const key = order?.created_at
+        ? new Date(order.created_at).toLocaleDateString()
+        : "Unknown Date";
+      dayMap[key] = (dayMap[key] || 0) + Number(order.total || 0);
+    }
+    return Object.entries(dayMap)
+      .map(([day, amount]) => ({ day, amount }))
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 10);
+  }, [filteredSalesOrders]);
+
+  const salesByCategory = useMemo(() => {
+    const categoryMap = {};
+    for (const order of filteredSalesOrders) {
+      const items = normalizeItems(order.items);
+      for (const item of items) {
+        const productId = Number(item?.product_id || 0);
+        const category =
+          item?.category || productById[productId]?.category || "Uncategorized";
+        const qty = Number(item?.qty || 0);
+        const price = Number(item?.price || 0);
+        categoryMap[category] = (categoryMap[category] || 0) + qty * price;
+      }
+    }
+    return Object.entries(categoryMap)
+      .map(([category, amount]) => ({ category, amount }))
+      .sort((a, b) => b.amount - a.amount);
+  }, [filteredSalesOrders, productById]);
+
+  const salesByBarangay = useMemo(() => {
+    const barangayMap = {};
+    for (const order of filteredSalesOrders) {
+      const orderUserId = getOrderUserId(order);
+      const profile = typeof orderUserId === "string" ? profilesById[orderUserId] : null;
+      
+      // Use barangay field from profile directly
+      const barangay = profile?.barangay?.trim() || "Unknown";
+      barangayMap[barangay] = (barangayMap[barangay] || 0) + 1;
+    }
+
+    return Object.entries(barangayMap)
+      .map(([barangay, count]) => ({ barangay, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+  }, [filteredSalesOrders, profilesById]);
+
+  const soldProducts = useMemo(() => {
+    const productMap = {};
+    for (const order of filteredSalesOrders) {
+      const items = normalizeItems(order.items);
+      for (const item of items) {
+        const productId = Number(item?.product_id || 0);
+        const key = productId > 0 ? `id:${productId}` : `name:${item?.name || "Unknown"}`;
+        if (!productMap[key]) {
+          productMap[key] = {
+            name: item?.name || productById[productId]?.name || "Unknown",
+            category: item?.category || productById[productId]?.category || "Uncategorized",
+            qty: 0,
+            amount: 0,
+          };
+        }
+        const qty = Number(item?.qty || 0);
+        const price = Number(item?.price || 0);
+        productMap[key].qty += qty;
+        productMap[key].amount += qty * price;
+      }
+    }
+    return Object.values(productMap).sort((a, b) => b.qty - a.qty);
+  }, [filteredSalesOrders, productById]);
+
+  const soldProductCategories = useMemo(() => {
+    const categories = Array.from(new Set(soldProducts.map((item) => item.category).filter(Boolean))).sort();
+    return ["All", ...categories];
+  }, [soldProducts]);
+
+  const filteredSoldProducts = useMemo(() => {
+    let products = salesProductCategory === "All" 
+      ? soldProducts 
+      : soldProducts.filter((item) => item.category === salesProductCategory);
+    
+    // Show only top 10 best-selling products if Best Buys is active
+    if (showBestBuysOnly) {
+      products = products.slice(0, 10);
+    }
+    
+    return products;
+  }, [soldProducts, salesProductCategory, showBestBuysOnly]);
 
   if (loading) {
     return (
@@ -602,7 +849,10 @@ export default function Admin() {
         <div className="mt-6 flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={() => setTab("products")}
+            onClick={() => {
+              setTab("products");
+              setLowStockOnly(false);
+            }}
             className={`px-4 py-2 rounded-lg border ${
               tab === "products" ? "bg-black text-white border-black" : "bg-white hover:bg-gray-50"
             }`}
@@ -626,6 +876,31 @@ export default function Admin() {
             }`}
           >
             Users
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setTab("sales")}
+            className={`px-4 py-2 rounded-lg border ${
+              tab === "sales" ? "bg-black text-white border-black" : "bg-white hover:bg-gray-50"
+            }`}
+          >
+            Sales
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setTab("products");
+              setLowStockOnly(true);
+            }}
+            className={`px-4 py-2 rounded-lg border ${
+              lowStockCount > 0
+                ? "bg-red-50 border-red-300 text-red-700 hover:bg-red-100"
+                : "bg-white hover:bg-gray-50"
+            }`}
+          >
+            Low Stocks ({lowStockCount})
           </button>
 
           <button
@@ -763,7 +1038,14 @@ export default function Admin() {
 
             <div className="bg-white border rounded-2xl shadow-sm p-5">
               <div className="flex items-center justify-between gap-3">
-                <h2 className="text-lg font-bold">Products</h2>
+                <div className="flex items-center gap-3">
+                  <h2 className="text-lg font-bold">
+                    Products {lowStockOnly ? "(Low Stock)" : ""}
+                  </h2>
+                  <span className="px-3 py-1 text-sm font-semibold rounded-full bg-emerald-100 text-emerald-700">
+                    {filteredProducts.length} Total
+                  </span>
+                </div>
                 <input
                   value={pSearch}
                   onChange={(e) => setPSearch(e.target.value)}
@@ -777,8 +1059,9 @@ export default function Admin() {
               ) : filteredProducts.length === 0 ? (
                 <div className="py-10 text-center text-gray-600">No products found.</div>
               ) : (
-                <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 justify-items-center">
-                  {filteredProducts.map((p) => (
+                <div className="mt-4 max-h-150 overflow-y-auto pr-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 justify-items-center">
+                    {filteredProducts.map((p) => (
                     <div
                       key={p.id}
                       className="w-full max-w-sm border rounded-2xl overflow-hidden bg-white shadow-sm flex flex-col"
@@ -807,21 +1090,35 @@ export default function Admin() {
                         <div className="mt-auto pt-3 flex items-center justify-between">
                           <div className="font-semibold">{money(p.price)}</div>
 
-                          <div className="flex gap-2">
+                          <div className="relative">
                             <button
                               type="button"
-                              onClick={() => startEditProduct(p)}
-                              className="px-3 py-2 text-sm rounded-lg border hover:bg-gray-50"
+                              onClick={() => setProductMenuOpen(productMenuOpen === p.id ? null : p.id)}
+                              className="p-2 hover:bg-gray-100 rounded-lg transition"
+                              title="Actions"
                             >
-                              Edit
+                              <svg className="w-5 h-5 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
+                                <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
+                              </svg>
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => removeProduct(p.id)}
-                              className="px-3 py-2 text-sm rounded-lg border hover:bg-gray-50"
-                            >
-                              Delete
-                            </button>
+                            {productMenuOpen === p.id && (
+                              <div className="user-menu-dropdown absolute right-0 bottom-full mb-1 w-36 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
+                                <button
+                                  type="button"
+                                  onClick={() => startEditProduct(p)}
+                                  className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 rounded-t-lg"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => removeProduct(p.id)}
+                                  className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 border-t rounded-b-lg"
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            )}
                           </div>
                         </div>
 
@@ -829,6 +1126,7 @@ export default function Admin() {
                       </div>
                     </div>
                   ))}
+                </div>
                 </div>
               )}
             </div>
@@ -838,14 +1136,28 @@ export default function Admin() {
         {/* ORDERS */}
         {tab === "orders" && (
           <div className="mt-6 bg-white border rounded-2xl shadow-sm p-5">
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 className="text-lg font-bold">Orders</h2>
-              <input
-                value={oSearch}
-                onChange={(e) => setOSearch(e.target.value)}
-                placeholder="Search orders..."
-                className="px-3 py-2 rounded-lg border w-64 max-w-full"
-              />
+              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                <select
+                  value={oCategory}
+                  onChange={(e) => setOCategory(e.target.value)}
+                  className="px-3 py-2 rounded-lg border bg-white"
+                >
+                  <option value="All">All</option>
+                  <option value="To Ship">To Ship</option>
+                  <option value="Out for Delivery">Out for Delivery</option>
+                  <option value="Completed">Completed</option>
+                  <option value="Cancelled">Cancelled</option>
+                </select>
+
+                <input
+                  value={oSearch}
+                  onChange={(e) => setOSearch(e.target.value)}
+                  placeholder="Search orders..."
+                  className="px-3 py-2 rounded-lg border w-64 max-w-full"
+                />
+              </div>
             </div>
 
             {oLoading ? (
@@ -853,8 +1165,9 @@ export default function Admin() {
             ) : filteredOrders.length === 0 ? (
               <div className="py-10 text-center text-gray-600">No orders found.</div>
             ) : (
-              <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 justify-items-center">
-                {filteredOrders.map((o) => (
+              <div className="mt-4 max-h-150 overflow-y-auto pr-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 justify-items-center">
+                  {filteredOrders.map((o) => (
                   <div
                     key={o.id}
                     className="w-full max-w-sm bg-white border rounded-2xl shadow-sm overflow-hidden flex flex-col"
@@ -866,7 +1179,7 @@ export default function Admin() {
                           <div className="font-semibold text-gray-900 truncate">{getProductNamesFor(o)}</div>
                         </div>
                         <span className="shrink-0 text-xs px-2 py-1 rounded-full border bg-white text-gray-700">
-                          {o.status || "placed"}
+                          {normalizeOrderStatus(o.status)}
                         </span>
                       </div>
 
@@ -882,18 +1195,9 @@ export default function Admin() {
 
                     <div className="p-4 flex flex-col flex-1">
                       <div className="flex items-start gap-3">
-                        <div className="h-9 w-9 rounded-xl bg-gray-100 border flex items-center justify-center shrink-0">
-                          <UserIcon />
-                        </div>
-
                         <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-xs px-2 py-1 rounded-full bg-black text-white">
-                              User
-                            </span>
-                            <div className="font-semibold text-gray-900 truncate">
-                              {resolvedOrderName(o)}
-                            </div>
+                          <div className="font-semibold text-gray-900 truncate">
+                            {resolvedOrderName(o)}
                           </div>
 
                           <div className="mt-1 text-sm text-gray-700 truncate">
@@ -910,8 +1214,8 @@ export default function Admin() {
                       <div className="mt-4 pt-3 border-t">
                         <div className="text-sm text-gray-700 font-medium mb-2">Status</div>
                         <select
-                          value={o.status || "placed"}
-                          onChange={(e) => updateOrderStatus(o.id, e.target.value)}
+                          value={normalizeOrderStatus(o.status)}
+                          onChange={(e) => updateOrderStatus(o.id, e.target.value, o.payment_method)}
                           className="w-full px-3 py-2 rounded-lg border bg-white"
                         >
                           {ORDER_STATUSES.map((s) => (
@@ -934,6 +1238,7 @@ export default function Admin() {
                     </div>
                   </div>
                 ))}
+                </div>
               </div>
             )}
           </div>
@@ -962,38 +1267,73 @@ export default function Admin() {
                   <thead>
                     <tr className="text-left text-gray-600">
                       <th className="py-2 pr-4">Name</th>
-                      <th className="py-2 pr-4">Contact</th>
-                      <th className="py-2 pr-4">Address</th>
+                      <th className="py-2 pr-4">Email</th>
                       <th className="py-2 pr-4">Role</th>
-                      <th className="py-2 pr-4">Actions</th>
+                      <th className="py-2 pr-4">Status</th>
+                      <th className="py-2 pr-4 w-16">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filteredUsers.map((u) => (
                       <tr key={u.id} className="border-t">
                         <td className="py-2 pr-4 font-medium">{u.name || "—"}</td>
-                        <td className="py-2 pr-4">{u.contact_number || "—"}</td>
-                        <td className="py-2 pr-4">{u.address || "—"}</td>
+                        <td className="py-2 pr-4">{u.email || "—"}</td>
                         <td className="py-2 pr-4">{u.role || "—"}</td>
                         <td className="py-2 pr-4">
-                          <div className="flex gap-2">
-                            <button
-                              type="button"
-                              onClick={() => toggleAdmin(u.id, true)}
-                              className="px-3 py-2 rounded-lg border hover:bg-gray-50"
-                              disabled={safeLower(u.role) === "admin"}
-                            >
-                              Make admin
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => toggleAdmin(u.id, false)}
-                              className="px-3 py-2 rounded-lg border hover:bg-gray-50"
-                              disabled={safeLower(u.role) !== "admin"}
-                            >
-                              Remove admin
-                            </button>
-                          </div>
+                          {u.banned ? (
+                            <span className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-700">Banned</span>
+                          ) : (
+                            <span className="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-700">Active</span>
+                          )}
+                        </td>
+                        <td className="py-2 pr-4 relative">
+                          <button
+                            type="button"
+                            onClick={() => setUserMenuOpen(userMenuOpen === u.id ? null : u.id)}
+                            className="p-2 hover:bg-gray-100 rounded-lg transition"
+                            title="Actions"
+                          >
+                            <svg className="w-5 h-5 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
+                              <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
+                            </svg>
+                          </button>
+                          {userMenuOpen === u.id && (
+                            <div className="absolute right-full mr-2 top-0 w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-50 max-h-64 overflow-y-auto">
+                              <button
+                                type="button"
+                                onClick={() => toggleAdmin(u.id, true)}
+                                disabled={safeLower(u.role) === "admin" || u.banned}
+                                className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed rounded-t-lg"
+                              >
+                                Make Admin
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => toggleAdmin(u.id, false)}
+                                disabled={safeLower(u.role) !== "admin" || u.banned}
+                                className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed border-t"
+                              >
+                                Remove Admin
+                              </button>
+                              {u.banned ? (
+                                <button
+                                  type="button"
+                                  onClick={() => unbanUser(u.id)}
+                                  className="w-full text-left px-4 py-2 text-sm text-green-600 hover:bg-green-50 border-t rounded-b-lg"
+                                >
+                                  Unban User
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => banUser(u.id)}
+                                  className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 border-t rounded-b-lg"
+                                >
+                                  Ban User
+                                </button>
+                              )}
+                            </div>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -1009,6 +1349,201 @@ export default function Admin() {
                 )}
               </div>
             )}
+          </div>
+        )}
+
+        {/* SALES */}
+        {tab === "sales" && (
+          <div className="mt-6 bg-white border rounded-2xl shadow-sm p-5 space-y-6">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-lg font-bold">Sales</h2>
+              <div className="text-sm text-gray-600">Based on Completed orders</div>
+            </div>
+
+            <div className="flex flex-wrap items-end gap-3">
+              <div>
+                <label className="text-xs text-gray-600">From</label>
+                <input
+                  type="date"
+                  value={salesDateFrom}
+                  onChange={(e) => setSalesDateFrom(e.target.value)}
+                  className="mt-1 block px-3 py-2 rounded-lg border bg-white text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-600">To</label>
+                <input
+                  type="date"
+                  value={salesDateTo}
+                  onChange={(e) => setSalesDateTo(e.target.value)}
+                  className="mt-1 block px-3 py-2 rounded-lg border bg-white text-sm"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setSalesDateFrom("");
+                  setSalesDateTo("");
+                }}
+                className="px-3 py-2 rounded-lg border bg-white hover:bg-gray-50 text-sm"
+              >
+                Clear
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+              <div className="border rounded-xl p-3 bg-gray-50">
+                <div className="text-xs text-gray-500">Total Income</div>
+                <div className="text-xl font-semibold mt-1">{money(salesIncome)}</div>
+              </div>
+              <div className="border rounded-xl p-3 bg-gray-50">
+                <div className="text-xs text-gray-500">Completed Orders</div>
+                <div className="text-xl font-semibold mt-1">{filteredSalesOrders.length}</div>
+              </div>
+              <div className="border rounded-xl p-3 bg-gray-50">
+                <div className="text-xs text-gray-500">Shipping Fee</div>
+                <div className="text-xl font-semibold mt-1">{money(totalShippingFee)}</div>
+              </div>
+              <div className="border rounded-xl p-3 bg-gray-50">
+                <div className="text-xs text-gray-500">Products Sold</div>
+                <div className="text-xl font-semibold mt-1">
+                  {soldProducts.reduce((sum, item) => sum + Number(item.qty || 0), 0)}
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="border rounded-xl p-4">
+                <h3 className="text-sm font-semibold mb-3">Income by Day</h3>
+                {salesByDay.length === 0 ? (
+                  <p className="text-sm text-gray-600">No sales data yet.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {salesByDay.map((entry) => {
+                      const max = Math.max(...salesByDay.map((x) => x.amount), 1);
+                      const widthPct = (entry.amount / max) * 100;
+                      return (
+                        <div key={entry.day}>
+                          <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
+                            <span>{entry.day}</span>
+                            <span>{money(entry.amount)}</span>
+                          </div>
+                          <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                            <div className="h-full bg-emerald-600" style={{ width: `${widthPct}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div className="border rounded-xl p-4">
+                <h3 className="text-sm font-semibold mb-3">Income by Category</h3>
+                {salesByCategory.length === 0 ? (
+                  <p className="text-sm text-gray-600">No category sales data yet.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {salesByCategory.map((entry) => {
+                      const max = Math.max(...salesByCategory.map((x) => x.amount), 1);
+                      const widthPct = (entry.amount / max) * 100;
+                      return (
+                        <div key={entry.category}>
+                          <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
+                            <span>{entry.category}</span>
+                            <span>{money(entry.amount)}</span>
+                          </div>
+                          <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                            <div className="h-full bg-blue-600" style={{ width: `${widthPct}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="border rounded-xl p-4">
+              <h3 className="text-sm font-semibold mb-3">Buyers by Barangay</h3>
+              {salesByBarangay.length === 0 ? (
+                <p className="text-sm text-gray-600">No barangay data yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {salesByBarangay.map((entry) => {
+                    const max = Math.max(...salesByBarangay.map((x) => x.count), 1);
+                    const widthPct = (entry.count / max) * 100;
+                    return (
+                      <div key={entry.barangay}>
+                        <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
+                          <span>{entry.barangay}</span>
+                          <span>{entry.count} buyer{entry.count > 1 ? "s" : ""}</span>
+                        </div>
+                        <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                          <div className="h-full bg-violet-600" style={{ width: `${widthPct}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="border rounded-xl p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                <h3 className="text-sm font-semibold">Products Sold</h3>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowBestBuysOnly(!showBestBuysOnly)}
+                    className={`px-3 py-2 rounded-lg border text-sm font-medium transition ${
+                      showBestBuysOnly
+                        ? "bg-emerald-700 text-white border-emerald-700"
+                        : "bg-white text-gray-700 hover:bg-gray-50"
+                    }`}
+                  >
+                    {showBestBuysOnly ? "Showing Top 10" : "Best Buys"}
+                  </button>
+                  <select
+                    value={salesProductCategory}
+                    onChange={(e) => setSalesProductCategory(e.target.value)}
+                    className="px-3 py-2 rounded-lg border bg-white text-sm"
+                  >
+                    {soldProductCategories.map((category) => (
+                      <option key={category} value={category}>
+                        {category}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              {filteredSoldProducts.length === 0 ? (
+                <p className="text-sm text-gray-600">No products sold yet.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-gray-600 border-b">
+                        <th className="py-2 pr-4">Product</th>
+                        <th className="py-2 pr-4">Category</th>
+                        <th className="py-2 pr-4">Qty Sold</th>
+                        <th className="py-2 pr-4">Income</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredSoldProducts.map((item, idx) => (
+                        <tr key={`${item.name}-${idx}`} className="border-b last:border-b-0">
+                          <td className="py-2 pr-4 font-medium">{item.name}</td>
+                          <td className="py-2 pr-4">{item.category}</td>
+                          <td className="py-2 pr-4">{item.qty}</td>
+                          <td className="py-2 pr-4 font-semibold">{money(item.amount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -1039,14 +1574,22 @@ export default function Admin() {
             </div>
 
             <div className="p-4 sm:p-5">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="border rounded-xl p-3">
                   <div className="text-xs text-gray-500">Status</div>
-                  <div className="font-semibold">{viewOrder.status || "placed"}</div>
+                  <div className="font-semibold">{normalizeOrderStatus(viewOrder.status)}</div>
+                </div>
+                <div className="border rounded-xl p-3">
+                  <div className="text-xs text-gray-500">Payment Status</div>
+                  <div className="font-semibold">{paymentStatusLabel(viewOrder)}</div>
                 </div>
                 <div className="border rounded-xl p-3">
                   <div className="text-xs text-gray-500">Total</div>
                   <div className="font-semibold">{money(viewOrder.total)}</div>
+                </div>
+                <div className="border rounded-xl p-3">
+                  <div className="text-xs text-gray-500">Shipping Fee</div>
+                  <div className="font-semibold">{money(viewOrder.shipping_fee || 0)}</div>
                 </div>
                 <div className="border rounded-xl p-3 sm:col-span-2">
                   <div className="text-xs text-gray-500">Address</div>

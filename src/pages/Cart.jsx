@@ -19,42 +19,71 @@ function money(n) {
   return `₱${Number(n || 0).toFixed(2)}`;
 }
 
-// Fallback zone shipping (if GPS not allowed)
-const SHIPPING_ZONES = [
-  { value: "near", label: "Near (0–3 km)", fee: 20 },
-  { value: "mid", label: "Medium (3–8 km)", fee: 40 },
-  { value: "far", label: "Far (8+ km)", fee: 60 },
+// Barangay-based shipping rates (distance from store)
+const BARANGAY_SHIPPING = {
+  // Near (₱20)
+  "Poblacion": 20,
+  "Pinagbarilan": 20,
+  "Santo Cristo": 20,
+  
+  // Medium (₱40)
+  "Bagong Nayon": 40,
+  "Barangca": 40,
+  "Sabang": 40,
+  "San Jose": 40,
+  "San Roque": 40,
+  "Santo Niño": 40,
+  "Tangos": 40,
+  "Tibag": 40,
+  
+  // Far (₱60)
+  "Calantipay": 60,
+  "Catulinan": 60,
+  "Concepcion": 60,
+  "Hinukay": 60,
+  "Makinabang": 60,
+  "Matangtubig": 60,
+  "Pagala": 60,
+  "Paitan": 60,
+  "Piel": 60,
+  "Santa Barbara": 60,
+  "Subic": 60,
+  "Sulivan": 60,
+  "Tarcan": 60,
+  "Tiaong": 60,
+  "Tilapayong": 60,
+  "Virjen De Los Flores": 60,
+};
+
+const BARANGAYS = [
+  "Bagong Nayon",
+  "Barangca",
+  "Calantipay",
+  "Catulinan",
+  "Concepcion",
+  "Makinabang",
+  "Matangtubig",
+  "Pagala",
+  "Paitan",
+  "Piel",
+  "Pinagbarilan",
+  "Poblacion",
+  "Sabang",
+  "San Jose",
+  "San Roque",
+  "Santa Barbara",
+  "Santo Cristo",
+  "Santo Niño",
+  "Subic",
+  "Sulivan",
+  "Tangos",
+  "Tarcan",
+  "Tiaong",
+  "Tibag",
+  "Tilapayong",
+  "Virjen De Los Flores",
+  "Hinukay",
 ];
-
-// ✅ Put your store coords here
-const STORE_LOCATION = { lat: 14.953525018497311, lng: 120.90085425371905 };
-
-// Haversine distance (no API)
-function toRad(x) {
-  return (x * Math.PI) / 180;
-}
-function haversineKm(a, b) {
-  const R = 6371;
-  const dLat = toRad(b.lat - a.lat);
-  const dLng = toRad(b.lng - a.lng);
-  const lat1 = toRad(a.lat);
-  const lat2 = toRad(b.lat);
-
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
-
-  return 2 * R * Math.asin(Math.sqrt(h));
-}
-function computeShippingFromKm(km) {
-  const base = 20;
-  const perKm = 5;
-  const min = 20;
-  const max = 150;
-
-  const fee = base + km * perKm;
-  return Math.min(max, Math.max(min, Math.round(fee)));
-}
 
 export default function Cart() {
   const navigate = useNavigate();
@@ -68,6 +97,7 @@ export default function Cart() {
 
   const [fullName, setFullName] = useState("");
   const [contactNumber, setContactNumber] = useState("");
+  const [barangay, setBarangay] = useState("");
   const [address, setAddress] = useState("");
 
   // Checkout UI
@@ -78,12 +108,6 @@ export default function Cart() {
   const [couponMsg, setCouponMsg] = useState("");
   const [placing, setPlacing] = useState(false);
   const [err, setErr] = useState("");
-
-  // Shipping: GPS + fallback zone
-  const [shippingMode, setShippingMode] = useState("gps"); // "gps" | "zone"
-  const [shippingZone, setShippingZone] = useState("near");
-  const [locStatus, setLocStatus] = useState("");
-  const [distanceKm, setDistanceKm] = useState(null);
 
   // ✅ GCash proof (FREE manual verification)
   const [gcashProofFile, setGcashProofFile] = useState(null);
@@ -148,7 +172,7 @@ export default function Cart() {
 
         const profileQuery = supabase
           .from("profiles")
-          .select("full_name, contact_number, address")
+          .select("full_name, contact_number, barangay, address")
           .eq("id", user.id)
           .maybeSingle();
 
@@ -165,6 +189,7 @@ export default function Cart() {
         } else if (profile) {
           setFullName(profile.full_name ?? "");
           setContactNumber(profile.contact_number ?? "");
+          setBarangay(profile.barangay ?? "");
           setAddress(profile.address ?? "");
         }
 
@@ -203,13 +228,9 @@ export default function Cart() {
   }, [items]);
 
   const shippingFee = useMemo(() => {
-    if (shippingMode === "gps") {
-      if (distanceKm == null) return 0;
-      return computeShippingFromKm(distanceKm);
-    }
-    const z = SHIPPING_ZONES.find((x) => x.value === shippingZone);
-    return z ? Number(z.fee || 0) : 0;
-  }, [shippingMode, distanceKm, shippingZone]);
+    if (!barangay) return 0;
+    return BARANGAY_SHIPPING[barangay] || 60; // default to far if not found
+  }, [barangay]);
 
   const discount = useMemo(() => {
     const code = coupon.trim().toUpperCase();
@@ -235,6 +256,7 @@ export default function Cart() {
     const payload = {
       full_name: fullName.trim(),
       contact_number: contactNumber.trim(),
+      barangay: barangay.trim(),
       address: address.trim(),
     };
 
@@ -277,36 +299,6 @@ export default function Cart() {
     }));
   }
 
-  function useMyLocation() {
-    setErr("");
-    setLocStatus("Requesting location…");
-    setDistanceKm(null);
-
-    if (!navigator.geolocation) {
-      setLocStatus("");
-      setShippingMode("zone");
-      setErr("Geolocation not supported. Please use Shipping Zone instead.");
-      return;
-    }
-
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-        const km = haversineKm(STORE_LOCATION, loc);
-        setDistanceKm(km);
-        setLocStatus(`Location detected ✅ (${km.toFixed(1)} km)`);
-        setShippingMode("gps");
-      },
-      () => {
-        setDistanceKm(null);
-        setLocStatus("");
-        setShippingMode("zone");
-        setErr("Location permission denied. Please choose Shipping Zone instead.");
-      },
-      { enableHighAccuracy: true, timeout: 10000 }
-    );
-  }
-
   // ✅ Upload proof to Supabase Storage bucket "payments" (public bucket)
   async function uploadGcashProof(userIdArg) {
     if (!gcashProofFile) return "";
@@ -337,12 +329,8 @@ export default function Cart() {
 
     if (!userId) return navigate("/login");
     if (items.length === 0) return setErr("Your cart is empty.");
-    if (!fullName.trim() || !contactNumber.trim() || !address.trim()) {
-      return setErr("Please fill Full name, Contact number, and Address.");
-    }
-
-    if (shippingMode === "gps" && distanceKm == null) {
-      return setErr('Please click "Use my location" or switch to Shipping Zone.');
+    if (!fullName.trim() || !contactNumber.trim() || !barangay.trim() || !address.trim()) {
+      return setErr("Please fill all required fields including barangay.");
     }
 
     // ✅ Require proof if GCash
@@ -391,7 +379,7 @@ export default function Cart() {
           p_items: purchaseItems,
           p_discount: Number(discount || 0),
           p_shipping_fee: Number(shippingFee || 0),
-          p_shipping_zone: shippingMode === "gps" ? "gps" : shippingZone,
+          p_shipping_zone: barangay || "Unknown", // now stores barangay name
           p_payment_method: paymentMethod,
           p_coupon_code: coupon.trim() ? coupon.trim().toUpperCase() : null,
           p_shipping_name: fullName.trim(),
@@ -624,6 +612,15 @@ export default function Cart() {
 
               {!loadingUser && userId && (
                 <>
+                  {!barangay && (
+                    <div className="p-4 rounded-xl bg-amber-50 border border-amber-300">
+                      <p className="text-sm text-amber-800 font-semibold">⚠️ Barangay Required</p>
+                      <p className="text-xs text-amber-700 mt-1">
+                        Please select your barangay below for shipping fee calculation. This is required for checkout.
+                      </p>
+                    </div>
+                  )}
+
                   <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs text-emerald-700 font-medium">Full name</label>
@@ -642,11 +639,27 @@ export default function Cart() {
                       />
                     </div>
                     <div className="sm:col-span-2">
-                      <label className="text-xs text-emerald-700 font-medium">Address</label>
+                      <label className="text-xs text-emerald-700 font-medium">Barangay <span className="text-red-600">*</span></label>
+                      <select
+                        className="mt-1 w-full border border-emerald-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                        value={barangay}
+                        onChange={(e) => setBarangay(e.target.value)}
+                      >
+                        <option value="">Select barangay</option>
+                        {BARANGAYS.map((brgy) => (
+                          <option key={brgy} value={brgy}>
+                            {brgy}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="text-xs text-emerald-700 font-medium">Street/House Details</label>
                       <textarea
-                        className="mt-1 w-full border border-emerald-200 rounded-lg px-3 py-2 text-sm min-h-[110px] focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                        className="mt-1 w-full border border-emerald-200 rounded-lg px-3 py-2 text-sm min-h-20 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                         value={address}
                         onChange={(e) => setAddress(e.target.value)}
+                        placeholder="House no., street, landmarks"
                       />
                     </div>
                   </div>
@@ -656,32 +669,22 @@ export default function Cart() {
                     <div className="mb-3">
                       <div className="text-sm font-semibold text-emerald-900">Shipping fee</div>
                       <div className="text-xs text-emerald-700">
-                        Share your location for accurate delivery distance calculation.
+                        Based on your selected barangay
                       </div>
                     </div>
 
-                    <div className="mt-3">
-                      <button
-                        type="button"
-                        onClick={useMyLocation}
-                        className="px-4 py-2 rounded-lg bg-white border border-emerald-300 text-sm text-emerald-700 hover:bg-emerald-100 transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
-                      >
-                        Use my location
-                      </button>
-                      {locStatus && (
-                        <div className="mt-2 text-sm text-emerald-700">{locStatus}</div>
-                      )}
-                      {shippingMode === "gps" && distanceKm == null && (
-                        <div className="mt-3 p-3 rounded-lg bg-amber-100 border border-amber-300">
-                          <p className="text-sm text-amber-800 font-medium">⚠️ Please click "Use my location" to calculate shipping cost, or switch to Shipping Zone.</p>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="mt-4 flex justify-between text-sm">
-                      <span className="text-emerald-700 font-medium">Shipping fee</span>
+                    <div className="mt-3 flex justify-between text-sm">
+                      <span className="text-emerald-700 font-medium">
+                        {barangay ? `${barangay} → ` : ""}Shipping fee
+                      </span>
                       <span className="font-semibold text-emerald-900">{money(shippingFee)}</span>
                     </div>
+
+                    {!barangay && (
+                      <div className="mt-3 p-3 rounded-lg bg-amber-100 border border-amber-300">
+                        <p className="text-sm text-amber-800 font-medium">⚠️ Please select your barangay to calculate shipping cost.</p>
+                      </div>
+                    )}
                   </div>
 
                   {/* Coupon */}
@@ -708,7 +711,6 @@ export default function Cart() {
                   {/* Payment */}
                   <div className="mt-5">
                     <label className="text-xs text-emerald-700 font-medium">Payment method</label>
-                    <div className="mt-1 text-xs text-amber-700 font-medium">ℹ️ GCash payment is currently unavailable. Please use Cash on Delivery.</div>
                     <div className="mt-3 flex flex-wrap gap-2">
                       <button
                         type="button"

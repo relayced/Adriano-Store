@@ -250,7 +250,7 @@ export default function Products({ session }) {
                   </div>
 
                   {/* Price and Stock Info */}
-                  <div className="mt-auto pt-3 flex items-center justify-between border-t border-gray-100 pt-3">
+                  <div className="mt-auto pt-3 flex items-center justify-between border-t border-gray-100">
                     <div className="font-bold text-lg text-emerald-700">
                       ₱{Number(p.price || 0).toFixed(2)}
                     </div>

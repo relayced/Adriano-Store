@@ -20,6 +20,40 @@ function withTimeout(promise, ms = 4000) {
   ]);
 }
 
+function SidebarIcon({ name }) {
+  if (name === "account") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M20 21a8 8 0 0 0-16 0" />
+        <circle cx="12" cy="8" r="4" />
+      </svg>
+    );
+  }
+  if (name === "orders") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3 7h18" />
+        <path d="M6 3h12l1 4H5l1-4z" />
+        <path d="M5 7h14v12H5z" />
+      </svg>
+    );
+  }
+  if (name === "cart") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="9" cy="20" r="1.5" />
+        <circle cx="18" cy="20" r="1.5" />
+        <path d="M2 3h3l2.1 10.5a2 2 0 0 0 2 1.6h8.9a2 2 0 0 0 2-1.5L22 7H7" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 2l2.3 4.7L19 9l-4.7 2.3L12 16l-2.3-4.7L5 9l4.7-2.3L12 2z" />
+    </svg>
+  );
+}
+
 export default function ProfileSidebar() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -69,9 +103,9 @@ export default function ProfileSidebar() {
 
   const links = useMemo(
     () => [
-      { to: "/profile", label: "Account", icon: "👤" },
-      { to: "/orders", label: "Orders", icon: "📦" },
-      { to: "/cart", label: "Cart", icon: "🛒", badge: cartCount > 0 ? cartCount : null },
+      { to: "/profile", label: "Account", icon: "account" },
+      { to: "/orders", label: "Orders", icon: "orders" },
+      { to: "/cart", label: "Cart", icon: "cart", badge: cartCount > 0 ? cartCount : null },
     ],
     [cartCount]
   );
@@ -90,7 +124,7 @@ export default function ProfileSidebar() {
   }
 
   return (
-    <aside className="border border-emerald-200 rounded-xl bg-emerald-50 p-4 w-full max-w-xs">
+    <aside className="border border-emerald-200 rounded-xl bg-emerald-50 p-4 w-full max-w-sm">
       <div className="mb-3">
         <div className="text-xs text-emerald-700">Signed in as</div>
         <div className="text-sm font-semibold break-all text-emerald-900">{email}</div>
@@ -112,7 +146,9 @@ export default function ProfileSidebar() {
             }`}
           >
             <span className="flex items-center gap-2">
-              <span>{l.icon}</span>
+              <span className="shrink-0">
+                <SidebarIcon name={l.icon} />
+              </span>
               {l.label}
             </span>
 
@@ -131,7 +167,7 @@ export default function ProfileSidebar() {
               isActive("/admin") ? "bg-emerald-700 text-white border-emerald-700" : "border-emerald-200 text-emerald-700 hover:bg-emerald-100"
             }`}
           >
-            🛠️ Admin
+            <SidebarIcon name="admin" /> Admin
           </Link>
         )}
       </nav>

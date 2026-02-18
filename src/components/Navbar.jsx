@@ -12,7 +12,7 @@ export default function Navbar({ session }) {
   const closeMobileMenu = () => setMobileMenuOpen(false);
 
   return (
-    <header className="border-b border-emerald-900/20 bg-gradient-to-r from-emerald-900/5 to-white">
+    <header className="border-b border-emerald-900/20 bg-linear-to-r from-emerald-900/5 to-white">
       <div className="mx-auto max-w-6xl px-6 py-4 flex items-center justify-between">
         {/* LEFT: LOGO */}
         <div
@@ -53,7 +53,17 @@ export default function Navbar({ session }) {
               onClick={() => navigate("/login")}
               className="hidden sm:flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-700 text-white text-sm hover:bg-emerald-800 transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
             >
-              <span className="text-lg">👤</span>
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                className="h-5 w-5"
+              >
+                <path d="M20 21a8 8 0 0 0-16 0" />
+                <circle cx="12" cy="8" r="4" />
+              </svg>
               Sign In
             </button>
           ) : (
@@ -114,7 +124,17 @@ export default function Navbar({ session }) {
                 }}
                 className="w-full mt-4 flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-700 text-white text-sm hover:bg-emerald-800 transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
               >
-                <span className="text-lg">👤</span>
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  className="h-5 w-5"
+                >
+                  <path d="M20 21a8 8 0 0 0-16 0" />
+                  <circle cx="12" cy="8" r="4" />
+                </svg>
                 Sign In
               </button>
             ) : (

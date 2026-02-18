@@ -26,15 +26,21 @@ export default function Login() {
       return setMsg(error.message);
     }
 
-    // Ensure profile exists (in case user was created before trigger existed)
+    // Check if user is banned
     if (data?.user?.id) {
       try {
-        // Check if profile exists
         const { data: profile } = await supabase
           .from("profiles")
-          .select("id")
+          .select("id, banned")
           .eq("id", data.user.id)
           .maybeSingle();
+
+        // If user is banned, sign them out and show error
+        if (profile?.banned) {
+          await supabase.auth.signOut();
+          setBusy(false);
+          return setMsg("Your account has been banned. Please contact support.");
+        }
 
         // If no profile, create it
         if (!profile) {
@@ -46,7 +52,7 @@ export default function Login() {
         }
       } catch (err) {
         // Ignore profile creation errors - don't block login
-        console.warn("Could not ensure profile exists:", err?.message);
+        console.warn("Could not check profile:", err?.message);
       }
     }
 
@@ -111,7 +117,33 @@ export default function Login() {
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-600 hover:text-emerald-800 transition"
                   title={showPassword ? "Hide password" : "Show password"}
                 >
-                  {showPassword ? "👁️" : "👁️‍🗨️"}
+                  {showPassword ? (
+                    <svg
+                      aria-hidden="true"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      className="h-5 w-5"
+                    >
+                      <path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z" />
+                      <circle cx="12" cy="12" r="3" />
+                    </svg>
+                  ) : (
+                    <svg
+                      aria-hidden="true"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      className="h-5 w-5"
+                    >
+                      <path d="M3 3l18 18" />
+                      <path d="M10.6 10.6a2 2 0 0 0 2.8 2.8" />
+                      <path d="M9.9 5.1C10.6 5 11.3 5 12 5c6 0 10 7 10 7a18.6 18.6 0 0 1-4.3 5.3" />
+                      <path d="M6.1 6.1A18.6 18.6 0 0 0 2 12s4 7 10 7c1 0 1.9-.1 2.8-.3" />
+                    </svg>
+                  )}
                 </button>
               </div>
             </div>

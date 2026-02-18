@@ -17,7 +17,7 @@ export default function SupabaseDebug() {
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1">
             <div className="font-semibold">Supabase error</div>
-            <div className="mt-1 break-words">{String(msg)}</div>
+            <div className="mt-1 wrap-break-word">{String(msg)}</div>
           </div>
           <button
             onClick={() => clearSupabaseError()}

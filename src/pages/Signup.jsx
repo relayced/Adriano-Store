@@ -3,9 +3,40 @@ import { supabase } from "../supabaseClient";
 import { Link, useNavigate } from "react-router-dom";
 import loginImg from "../assets/login.jpg";
 
+const BARANGAYS = [
+  "Bagong Nayon",
+  "Barangca",
+  "Calantipay",
+  "Catulinan",
+  "Concepcion",
+  "Makinabang",
+  "Matangtubig",
+  "Pagala",
+  "Paitan",
+  "Piel",
+  "Pinagbarilan",
+  "Poblacion",
+  "Sabang",
+  "San Jose",
+  "San Roque",
+  "Santa Barbara",
+  "Santo Cristo",
+  "Santo Niño",
+  "Subic",
+  "Sulivan",
+  "Tangos",
+  "Tarcan",
+  "Tiaong",
+  "Tibag",
+  "Tilapayong",
+  "Virjen De Los Flores",
+  "Hinukay",
+];
+
 export default function Signup() {
   const [fullName, setFullName] = useState("");
   const [contactNumber, setContactNumber] = useState("");
+  const [barangay, setBarangay] = useState("");
   const [address, setAddress] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -24,6 +55,12 @@ export default function Signup() {
       return;
     }
 
+    // Validate barangay selection
+    if (!barangay) {
+      setMsg("Please select your barangay");
+      return;
+    }
+
     setBusy(true);
 
     try {
@@ -35,6 +72,7 @@ export default function Signup() {
           data: {
             full_name: fullName,
             contact_number: contactNumber,
+            barangay: barangay,
             address: address,
           },
         },
@@ -56,6 +94,7 @@ export default function Signup() {
               email: email,
               full_name: fullName.trim(),
               contact_number: contactNumber.trim(),
+              barangay: barangay,
               address: address.trim(),
               role: "user",
             },
@@ -122,12 +161,29 @@ export default function Signup() {
             </div>
 
             <div className="space-y-1">
+              <label className="text-sm font-semibold text-emerald-900">Barangay</label>
+              <select
+                className="w-full border border-emerald-900/20 rounded-xl px-4 py-2 outline-none focus:ring-2 focus:ring-emerald-600 transition bg-white"
+                value={barangay}
+                onChange={(e) => setBarangay(e.target.value)}
+                required
+              >
+                <option value="">Select your barangay</option>
+                {BARANGAYS.map((brgy) => (
+                  <option key={brgy} value={brgy}>
+                    {brgy}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-1">
               <label className="text-sm font-semibold text-emerald-900">Address</label>
               <textarea
                 className="w-full border border-emerald-900/20 rounded-xl px-4 py-2 outline-none focus:ring-2 focus:ring-emerald-600 transition min-h-20"
                 value={address}
                 onChange={(e) => setAddress(e.target.value)}
-                placeholder="House/Street, Barangay, City, Province"
+                placeholder="House/Street number and other details"
                 required
               />
             </div>
@@ -165,7 +221,33 @@ export default function Signup() {
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-600 hover:text-emerald-800 transition"
                   title={showPassword ? "Hide password" : "Show password"}
                 >
-                  {showPassword ? "👁️" : "👁️‍🗨️"}
+                  {showPassword ? (
+                    <svg
+                      aria-hidden="true"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      className="h-5 w-5"
+                    >
+                      <path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z" />
+                      <circle cx="12" cy="12" r="3" />
+                    </svg>
+                  ) : (
+                    <svg
+                      aria-hidden="true"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      className="h-5 w-5"
+                    >
+                      <path d="M3 3l18 18" />
+                      <path d="M10.6 10.6a2 2 0 0 0 2.8 2.8" />
+                      <path d="M9.9 5.1C10.6 5 11.3 5 12 5c6 0 10 7 10 7a18.6 18.6 0 0 1-4.3 5.3" />
+                      <path d="M6.1 6.1A18.6 18.6 0 0 0 2 12s4 7 10 7c1 0 1.9-.1 2.8-.3" />
+                    </svg>
+                  )}
                 </button>
               </div>
             </div>

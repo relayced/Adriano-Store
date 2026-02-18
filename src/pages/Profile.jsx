@@ -3,6 +3,36 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "../supabaseClient";
 import ProfileSidebar from "../components/ProfileSidebar";
 
+const BARANGAYS = [
+  "Bagong Nayon",
+  "Barangca",
+  "Calantipay",
+  "Catulinan",
+  "Concepcion",
+  "Makinabang",
+  "Matangtubig",
+  "Pagala",
+  "Paitan",
+  "Piel",
+  "Pinagbarilan",
+  "Poblacion",
+  "Sabang",
+  "San Jose",
+  "San Roque",
+  "Santa Barbara",
+  "Santo Cristo",
+  "Santo Niño",
+  "Subic",
+  "Sulivan",
+  "Tangos",
+  "Tarcan",
+  "Tiaong",
+  "Tibag",
+  "Tilapayong",
+  "Virjen De Los Flores",
+  "Hinukay",
+];
+
 export default function Profile() {
   const navigate = useNavigate();
 
@@ -14,6 +44,7 @@ export default function Profile() {
 
   const [fullName, setFullName] = useState("");
   const [contactNumber, setContactNumber] = useState("");
+  const [barangay, setBarangay] = useState("");
   const [address, setAddress] = useState("");
 
   const [msg, setMsg] = useState("");
@@ -51,7 +82,7 @@ export default function Profile() {
       // Load profile row
       const { data: profile, error: profileErr } = await supabase
         .from("profiles")
-        .select("full_name, contact_number, address")
+        .select("full_name, contact_number, barangay, address")
         .eq("id", user.id)
         .maybeSingle();
 
@@ -68,6 +99,7 @@ export default function Profile() {
         // Profile exists - use it
         setFullName(profile.full_name ?? "");
         setContactNumber(profile.contact_number ?? "");
+        setBarangay(profile.barangay ?? "");
         setAddress(profile.address ?? "");
       } else {
         // Profile doesn't exist yet - try to create it from auth metadata
@@ -79,6 +111,7 @@ export default function Profile() {
           email: user.email || "",
           full_name: (metadata.full_name || "").trim(),
           contact_number: (metadata.contact_number || "").trim(),
+          barangay: (metadata.barangay || "").trim(),
           address: (metadata.address || "").trim(),
           role: "user",
         };
@@ -97,12 +130,14 @@ export default function Profile() {
 
           setFullName(payload.full_name);
           setContactNumber(payload.contact_number);
+          setBarangay(payload.barangay);
           setAddress(payload.address);
         } catch (e) {
           console.warn("Profile creation error:", e);
           // Set from metadata anyway
           setFullName((metadata.full_name || "").trim());
           setContactNumber((metadata.contact_number || "").trim());
+          setBarangay((metadata.barangay || "").trim());
           setAddress((metadata.address || "").trim());
         }
       }
@@ -126,6 +161,7 @@ export default function Profile() {
       const payload = {
         full_name: fullName.trim(),
         contact_number: contactNumber.trim(),
+        barangay: barangay.trim(),
         address: address.trim(),
       };
 
@@ -174,7 +210,7 @@ export default function Profile() {
       <h2 className="text-2xl font-bold text-emerald-900">Profile</h2>
       <p className="text-sm text-emerald-700 mt-1">Manage your account and preferences.</p>
 
-      <div className="mt-6 grid grid-cols-1 md:grid-cols-[15rem_1fr] gap-6">
+      <div className="mt-6 grid grid-cols-1 md:grid-cols-[18rem_1fr] gap-6">
         <ProfileSidebar />
 
         <section className="min-w-0">
@@ -231,17 +267,45 @@ export default function Profile() {
                 {/* Shipping Address Section */}
                 <div className="pt-4">
                   <h3 className="text-sm font-semibold text-emerald-900 mb-3">Delivery Address</h3>
-                  <label className="text-xs text-emerald-700 font-medium">Address</label>
-                  <textarea
-                    value={address}
-                    onChange={(e) => setAddress(e.target.value)}
-                    className="mt-1.5 w-full border border-emerald-200 rounded-lg px-3 py-2 text-sm min-h-20 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                    placeholder="House no., street, barangay, city, province"
-                    disabled={loading}
-                  />
-                  <p className="mt-1.5 text-xs text-emerald-700">
-                    Used for order deliveries
-                  </p>
+                  
+                  {!barangay && (
+                    <div className="mb-4 p-3 rounded-lg bg-amber-50 border border-amber-300">
+                      <p className="text-sm text-amber-800 font-medium">📍 Please select your barangay for accurate shipping fees</p>
+                    </div>
+                  )}
+
+                  <div className="space-y-3">
+                    <div>
+                      <label className="text-xs text-emerald-700 font-medium">Barangay <span className="text-red-600">*</span></label>
+                      <select
+                        value={barangay}
+                        onChange={(e) => setBarangay(e.target.value)}
+                        className="mt-1.5 w-full border border-emerald-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                        disabled={loading}
+                      >
+                        <option value="">Select barangay</option>
+                        {BARANGAYS.map((brgy) => (
+                          <option key={brgy} value={brgy}>
+                            {brgy}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-xs text-emerald-700 font-medium">Street/House Details</label>
+                      <textarea
+                        value={address}
+                        onChange={(e) => setAddress(e.target.value)}
+                        className="mt-1.5 w-full border border-emerald-200 rounded-lg px-3 py-2 text-sm min-h-20 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                        placeholder="House no., street, landmarks"
+                        disabled={loading}
+                      />
+                      <p className="mt-1.5 text-xs text-emerald-700">
+                        Shipping fee is based on your selected barangay
+                      </p>
+                    </div>
+                  </div>
                 </div>
 
                 {/* Actions */}

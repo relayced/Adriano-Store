@@ -349,7 +349,7 @@ export default function Home({ session, fullName, role }) {
       {/* PRODUCT SHOWCASE */}
       <section className="mt-10">
         {loadingSlideshow ? (
-          <div className="rounded-2xl bg-gradient-to-br from-emerald-50 to-emerald-100 p-12 text-center text-emerald-700">
+          <div className="rounded-2xl bg-linear-to-br from-emerald-50 to-emerald-100 p-12 text-center text-emerald-700">
             <div className="text-lg font-semibold">Loading products…</div>
           </div>
         ) : slideshowErr ? (
@@ -390,14 +390,19 @@ export default function Home({ session, fullName, role }) {
                       <button
                         onClick={() => addToCart(currentProduct)}
                         disabled={Number(currentProduct.stock || 0) === 0}
-                        className="px-6 py-3 rounded-lg bg-emerald-100 text-emerald-700 text-sm font-medium hover:bg-emerald-200 disabled:bg-gray-400 disabled:text-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+                        className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-700 hover:bg-emerald-200 disabled:bg-gray-200 disabled:text-gray-500 flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+                        aria-label={`Add ${currentProduct.name || "product"} to cart`}
+                        title={Number(currentProduct.stock || 0) > 0 ? "Add to cart" : "Out of stock"}
                       >
-                        {Number(currentProduct.stock || 0) > 0 ? "Add to Cart" : "Out of Stock"}
+                        <svg viewBox="0 0 24 24" aria-hidden="true" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M12 5v14" />
+                          <path d="M5 12h14" />
+                        </svg>
                       </button>
                       <button
                         onClick={() => openBuyNow(currentProduct)}
                         disabled={Number(currentProduct.stock || 0) === 0}
-                        className="px-6 py-3 rounded-lg bg-emerald-700 text-white font-semibold hover:bg-emerald-800 disabled:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+                        className="px-4 py-2 rounded-lg bg-emerald-700 text-white text-sm font-semibold hover:bg-emerald-800 disabled:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
                       >
                         Buy Now
                       </button>
