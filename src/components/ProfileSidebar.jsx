@@ -120,7 +120,6 @@ export default function ProfileSidebar() {
     }
     localStorage.removeItem("cart");
     navigate("/login", { replace: true });
-    window.location.reload(); // hard reset session UI
   }
 
   return (
