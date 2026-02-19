@@ -108,6 +108,7 @@ export default function Cart() {
   const [couponMsg, setCouponMsg] = useState("");
   const [placing, setPlacing] = useState(false);
   const [err, setErr] = useState("");
+  const [success, setSuccess] = useState("");
 
   // ✅ GCash proof (FREE manual verification)
   const [gcashProofFile, setGcashProofFile] = useState(null);
@@ -335,6 +336,7 @@ export default function Cart() {
 
   async function placeOrder() {
     setErr("");
+    setSuccess("");
     setCouponMsg("");
 
     if (!userId) return navigate("/login");
@@ -423,8 +425,7 @@ export default function Cart() {
       setGcashProofFile(null);
       setGcashProofPreview("");
       setGcashReference("");
-
-      navigate("/orders");
+      setSuccess("Order placed successfully.");
     } catch (e) {
       setErr(e?.message || "Failed to place order.");
     } finally {
@@ -487,6 +488,12 @@ export default function Cart() {
           {err && (
             <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
               {err}
+            </div>
+          )}
+
+          {success && (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+              {success}
             </div>
           )}
 
@@ -649,9 +656,15 @@ export default function Cart() {
                         ))}
                       </div>
 
-                      <div className="mt-4 pt-3 border-t border-emerald-200 flex justify-between">
-                        <span className="text-emerald-700 font-medium">Products subtotal</span>
-                        <span className="font-semibold text-emerald-900">{money(subtotal)}</span>
+                      <div className="mt-4 pt-3 border-t border-emerald-200 space-y-2">
+                        <div className="flex justify-between">
+                          <span className="text-emerald-700 font-medium">Products subtotal</span>
+                          <span className="font-semibold text-emerald-900">{money(subtotal)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-emerald-700 font-medium">Shipping fee</span>
+                          <span className="font-semibold text-emerald-900">{money(shippingFee)}</span>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -828,9 +841,19 @@ export default function Cart() {
                     )}
                   </div>
 
-                  <div className="mt-6 flex items-center justify-between border-t border-emerald-200 pt-3">
-                    <div className="text-xs font-medium text-emerald-900">Total cost</div>
-                    <div className="text-lg font-bold text-emerald-900">{money(productTotal + shippingFee)}</div>
+                  <div className="mt-6 space-y-2 border-t border-emerald-200 pt-3">
+                    <div className="flex items-center justify-between">
+                      <div className="text-xs font-medium text-emerald-900">Subtotal</div>
+                      <div className="text-sm font-semibold text-emerald-900">{money(productTotal)}</div>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="text-xs font-medium text-emerald-900">Shipping fee</div>
+                      <div className="text-sm font-semibold text-emerald-900">{money(shippingFee)}</div>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="text-xs font-medium text-emerald-900">Total cost</div>
+                      <div className="text-lg font-bold text-emerald-900">{money(productTotal + shippingFee)}</div>
+                    </div>
                   </div>
 
                   <button

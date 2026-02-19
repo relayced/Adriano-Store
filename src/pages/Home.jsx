@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "../supabaseClient";
+import QuickCheckoutModal from "../components/QuickCheckoutModal";
 
 const NEW_ARRIVALS_LIMIT = 8;
 const PRODUCT_IMG_BUCKET = "product-images";
@@ -153,7 +154,7 @@ function ProductCard({
   );
 }
 
-export default function Home({ session, fullName, role }) {
+export default function Home({ session, fullName, role, isBanned }) {
   const navigate = useNavigate();
   const isMountedRef = useRef(true);
 
@@ -179,6 +180,8 @@ export default function Home({ session, fullName, role }) {
   const [buyNowQty, setBuyNowQty] = useState(1);
   const [buyNowOpen, setBuyNowOpen] = useState(false);
   const [buyNowOptions, setBuyNowOptions] = useState(null);
+  const [quickCheckoutOpen, setQuickCheckoutOpen] = useState(false);
+  const [quickCheckoutItem, setQuickCheckoutItem] = useState(null);
   const [toast, setToast] = useState({ message: "", visible: false });
 
   const [selectedProduct, setSelectedProduct] = useState(null);
@@ -324,6 +327,11 @@ export default function Home({ session, fullName, role }) {
       navigate("/login");
       return;
     }
+    if (isBanned) {
+      setToast({ message: `Your account is suspended`, visible: true });
+      setTimeout(() => setToast({ message: "", visible: false }), 3000);
+      return;
+    }
     if (!product?.id) return;
 
     const optionsKey = makeOptionsKey(options);
@@ -354,6 +362,11 @@ export default function Home({ session, fullName, role }) {
   function openBuyNow(product, options = null) {
     if (!session) {
       navigate("/login");
+      return;
+    }
+    if (isBanned) {
+      setToast({ message: `Your account is suspended`, visible: true });
+      setTimeout(() => setToast({ message: "", visible: false }), 3000);
       return;
     }
     setBuyNowProduct(product);
@@ -537,9 +550,20 @@ export default function Home({ session, fullName, role }) {
       });
     }
 
+    const checkoutItem = {
+      product_id: buyNowProduct.id,
+      name: buyNowProduct.name,
+      price: Number(buyNowProduct.price || 0),
+      qty: Number(buyNowQty),
+      image_url: buyNowProduct.image_url || null,
+      options: normalizeOptions(buyNowOptions),
+      options_key: optionsKey,
+    };
+
     localStorage.setItem("cart", JSON.stringify(cart));
     setBuyNowOpen(false);
-    navigate("/cart?checkout=1");
+    setQuickCheckoutItem(checkoutItem);
+    setQuickCheckoutOpen(true);
   }
 
   async function handleUpdateImage(productId, file) {
@@ -581,6 +605,18 @@ export default function Home({ session, fullName, role }) {
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-12 bg-white rounded-2xl mt-6 mb-6 shadow-sm">
+      {isBanned && (
+        <div className="mb-8 rounded-2xl border-2 border-red-300 bg-red-50 p-6 flex items-start gap-4">
+          <div className="text-4xl">🚫</div>
+          <div className="flex-1">
+            <h2 className="text-xl font-bold text-red-900">Account Suspended</h2>
+            <p className="text-red-800 mt-2">
+              Your account has been suspended and you cannot make purchases at this time. If you believe this is a mistake, please contact our support team.
+            </p>
+          </div>
+        </div>
+      )}
+
       <h1 className="text-4xl font-bold tracking-tight text-[#0A2540] text-center">Adriano School Supplies</h1>
 
       <p className="mt-3 text-lg text-gray-700 text-center">Your complete destination for quality school essentials.</p>
@@ -608,115 +644,155 @@ export default function Home({ session, fullName, role }) {
           <div className="space-y-8">
             {/* Featured Product Slide (if available) */}
             {currentProduct && (
-              <div className="rounded-2xl overflow-hidden bg-white border border-emerald-900/20 shadow-md">
-                <div
-                  className="grid grid-cols-1 md:grid-cols-2 gap-6 p-6 md:p-10 cursor-pointer"
-                  onClick={() => openProductDetails(currentProduct)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      openProductDetails(currentProduct);
-                    }
-                  }}
-                  role="button"
-                  tabIndex={0}
-                >
-                  {/* Image */}
-                  <div className="flex items-center justify-center bg-emerald-50 rounded-xl h-80">
-                    {currentProduct.image_url ? (
-                      <img
-                        src={currentProduct.image_url}
-                        alt={currentProduct.name}
-                        className="w-full h-full object-cover rounded-xl"
-                      />
-                    ) : (
-                      <span className="text-emerald-300 text-center">No image</span>
-                    )}
-                  </div>
-
-                  {/* Content */}
-                  <div className="flex flex-col justify-center">
-                    <h2 className="text-3xl font-bold text-emerald-900">{currentProduct.name}</h2>
-                    <p className="mt-3 text-gray-700 leading-relaxed line-clamp-4">{currentProduct.description || "No description available."}</p>
-                    <div className="mt-2 text-sm text-amber-700">
-                      {(ratingsByProduct[currentProduct.id]?.count || 0) > 0
-                        ? `${ratingsByProduct[currentProduct.id].avg.toFixed(1)} ★ (${ratingsByProduct[currentProduct.id].count})`
-                        : "No ratings"}
+              <div className="rounded-2xl overflow-hidden bg-white border border-emerald-100 shadow-lg">
+                {/* Header with gradient */}
+                <div className="p-5 sm:p-6 border-b border-emerald-100 bg-linear-to-r from-emerald-50 to-white">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-xs font-semibold text-emerald-700 uppercase tracking-wide">Featured Product</div>
+                      <h2 className="text-2xl sm:text-3xl font-bold text-emerald-900 mt-1">{currentProduct.name}</h2>
                     </div>
-
-                    <div className="mt-6 flex items-center gap-3">
-                      <div className="text-4xl font-bold text-emerald-800">₱{Number(currentProduct.price || 0).toFixed(2)}</div>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const { lengthOptions, colorOptions } = getProductOptions(currentProduct);
-                          if (lengthOptions.length || colorOptions.length) {
-                            openProductDetails(currentProduct);
-                            return;
-                          }
-                          addToCart(currentProduct);
-                        }}
-                        disabled={Number(currentProduct.stock || 0) === 0}
-                        className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-700 hover:bg-emerald-200 disabled:bg-gray-200 disabled:text-gray-500 flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
-                        aria-label={`Add ${currentProduct.name || "product"} to cart`}
-                        title={Number(currentProduct.stock || 0) > 0 ? "Add to cart" : "Out of stock"}
-                      >
-                        <svg viewBox="0 0 24 24" aria-hidden="true" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M3 4h2l2 10h10l2-7H6" />
-                          <circle cx="9" cy="19" r="1.5" />
-                          <circle cx="17" cy="19" r="1.5" />
-                        </svg>
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const { lengthOptions, colorOptions } = getProductOptions(currentProduct);
-                          if (lengthOptions.length || colorOptions.length) {
-                            openProductDetails(currentProduct);
-                            return;
-                          }
-                          openBuyNow(currentProduct);
-                        }}
-                        disabled={Number(currentProduct.stock || 0) === 0}
-                        className="px-4 py-2 rounded-lg bg-emerald-700 text-white text-sm font-semibold hover:bg-emerald-800 disabled:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
-                      >
-                        Buy Now
-                      </button>
+                    <div className="flex items-center gap-2">
+                      {Number(currentProduct.stock || 0) > 0 && (
+                        <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold">
+                          <span className="w-2 h-2 rounded-full bg-emerald-600"></span>
+                          In Stock
+                        </span>
+                      )}
+                      {Number(currentProduct.stock || 0) === 0 && (
+                        <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-red-100 text-red-700 text-xs font-semibold">
+                          <span className="w-2 h-2 rounded-full bg-red-600"></span>
+                          Out of Stock
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
 
-                {/* Slide Navigation */}
-                <div className="flex items-center justify-between gap-4 px-6 py-4 bg-emerald-50 border-t border-emerald-900/20">
+                {/* Content */}
+                <div className="p-6 sm:p-8">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    {/* Image */}
+                    <div className="flex items-center justify-center bg-emerald-50 rounded-2xl h-80 overflow-hidden">
+                      {currentProduct.image_url ? (
+                        <img
+                          src={currentProduct.image_url}
+                          alt={currentProduct.name}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <span className="text-emerald-300">No image</span>
+                      )}
+                    </div>
+
+                    {/* Info & Actions */}
+                    <div className="flex flex-col justify-between">
+                      <div className="space-y-4">
+                        <div>
+                          <p className="text-gray-700 leading-relaxed line-clamp-4">{currentProduct.description || "No description available."}</p>
+                        </div>
+                      </div>
+
+                      {/* Price & Actions */}
+                      <div className="space-y-4 pt-6 border-t border-gray-100">
+                        {/* Rating */}
+                        <div className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-100">
+                          <span className="text-sm font-semibold text-amber-900">
+                            {(ratingsByProduct[currentProduct.id]?.count || 0) > 0
+                              ? `${ratingsByProduct[currentProduct.id].avg.toFixed(1)} ★`
+                              : "No ratings"}
+                          </span>
+                          <span className="text-xs text-amber-700">
+                            {(ratingsByProduct[currentProduct.id]?.count || 0)} review{(ratingsByProduct[currentProduct.id]?.count || 0) !== 1 ? "s" : ""}
+                          </span>
+                        </div>
+
+                        <div className="flex items-baseline gap-3">
+                          <div className="text-4xl font-bold text-emerald-700">₱{Number(currentProduct.price || 0).toFixed(2)}</div>
+                        </div>
+
+                        <div className="flex gap-3">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const { lengthOptions, colorOptions } = getProductOptions(currentProduct);
+                              if (lengthOptions.length || colorOptions.length) {
+                                openProductDetails(currentProduct);
+                                return;
+                              }
+                              addToCart(currentProduct);
+                            }}
+                            disabled={Number(currentProduct.stock || 0) === 0}
+                            className="flex-1 px-4 py-3 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 disabled:opacity-50 disabled:cursor-not-allowed font-semibold text-sm flex items-center justify-center gap-2 transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+                          >
+                            <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M3 4h2l2 10h10l2-7H6" />
+                              <circle cx="9" cy="19" r="1.5" />
+                              <circle cx="17" cy="19" r="1.5" />
+                            </svg>
+                            Add to Cart
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const { lengthOptions, colorOptions } = getProductOptions(currentProduct);
+                              if (lengthOptions.length || colorOptions.length) {
+                                openProductDetails(currentProduct);
+                                return;
+                              }
+                              openBuyNow(currentProduct);
+                            }}
+                            disabled={Number(currentProduct.stock || 0) === 0}
+                            className="flex-1 px-4 py-3 rounded-lg bg-emerald-700 text-white hover:bg-emerald-800 disabled:opacity-50 disabled:cursor-not-allowed font-semibold text-sm transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+                          >
+                            Buy Now
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Navigation */}
+                <div className="flex items-center justify-between gap-4 px-6 py-4 bg-linear-to-r from-gray-50 to-white border-t border-emerald-100">
                   <button
                     onClick={() => setCurrentSlide((prev) => (prev - 1 + slideshowProducts.length) % slideshowProducts.length)}
-                    className="px-4 py-2 rounded-lg border border-emerald-900/20 hover:bg-emerald-100 text-emerald-700 transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg border border-emerald-200 bg-white hover:bg-emerald-50 text-emerald-700 font-medium text-sm transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
                   >
-                    ← Previous
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                    </svg>
+                    Previous
                   </button>
 
-                  <div className="text-sm text-emerald-700 font-semibold">
+                  <div className="text-sm font-semibold text-emerald-700 px-4 py-2 rounded-lg bg-emerald-50">
                     {currentSlide + 1} / {slideshowProducts.length}
                   </div>
 
                   <button
                     onClick={() => setCurrentSlide((prev) => (prev + 1) % slideshowProducts.length)}
-                    className="px-4 py-2 rounded-lg border border-emerald-900/20 hover:bg-emerald-100 text-emerald-700 transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg border border-emerald-200 bg-white hover:bg-emerald-50 text-emerald-700 font-medium text-sm transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
                   >
-                    Next →
+                    Next
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
                   </button>
                 </div>
 
                 {/* Slide Indicators */}
                 <div className="flex justify-center gap-2 px-6 py-4 bg-white flex-wrap">
-                    {slideshowProducts.map((_, i) => (
+                  {slideshowProducts.map((_, i) => (
                     <button
                       key={i}
                       onClick={() => setCurrentSlide(i)}
-                      className={`w-2 h-2 rounded-full transition ${
-                        i === currentSlide ? "bg-emerald-700" : "bg-emerald-300 hover:bg-emerald-400"
+                      className={`rounded-full transition ${
+                        i === currentSlide 
+                          ? "w-3 h-3 bg-emerald-700" 
+                          : "w-2 h-2 bg-emerald-300 hover:bg-emerald-400"
                       }`}
                       aria-label={`Go to slide ${i + 1}`}
+                      title={`Slide ${i + 1}`}
                     />
                   ))}
                 </div>
@@ -950,6 +1026,27 @@ export default function Home({ session, fullName, role }) {
           </div>
         </div>
       )}
+
+      <QuickCheckoutModal
+        open={quickCheckoutOpen}
+        item={quickCheckoutItem}
+        onClose={() => {
+          setQuickCheckoutOpen(false);
+          setQuickCheckoutItem(null);
+        }}
+        onOrdered={() => {
+          if (!quickCheckoutItem?.product_id) return;
+          const cart = JSON.parse(localStorage.getItem("cart") || "[]");
+          const next = cart.filter(
+            (x) =>
+              !(
+                Number(x.product_id) === Number(quickCheckoutItem.product_id) &&
+                (x.options_key || "") === (quickCheckoutItem.options_key || "")
+              )
+          );
+          localStorage.setItem("cart", JSON.stringify(next));
+        }}
+      />
 
       {detailsOpen && selectedProduct && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">

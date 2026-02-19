@@ -1,18 +1,19 @@
 import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { supabase } from "../supabaseClient";
 
 export default function Checkout() {
   const { id } = useParams();
-  const navigate = useNavigate();
 
   const [product, setProduct] = useState(null);
   const [qty, setQty] = useState(1);
   const [msg, setMsg] = useState("");
+  const [msgType, setMsgType] = useState("error");
   const [busy, setBusy] = useState(false);
 
   async function loadProduct() {
     setMsg("");
+    setMsgType("error");
     try {
       const timeoutMs = 60000;
       const timeout = new Promise((_, reject) =>
@@ -47,6 +48,7 @@ export default function Checkout() {
       if (error) {
         setProduct(null);
         setMsg(error.message);
+        setMsgType("error");
         return;
       }
 
@@ -57,12 +59,14 @@ export default function Checkout() {
       console.error("loadProduct error:", e);
       setProduct(null);
       setMsg(e?.message || "Failed to load product.");
+      setMsgType("error");
     }
   }
 
   useEffect(() => {
     if (!id) {
       setMsg("Missing product id in URL. Route must be /checkout/:id");
+      setMsgType("error");
       return;
     }
     loadProduct();
@@ -71,6 +75,7 @@ export default function Checkout() {
 
   async function placeOrder() {
     setMsg("");
+    setMsgType("error");
     setBusy(true);
 
     try {
@@ -91,10 +96,11 @@ export default function Checkout() {
 
       // refresh UI stock
       await loadProduct();
-
-      navigate("/orders");
+      setMsg("Order placed successfully.");
+      setMsgType("success");
     } catch (err) {
       setMsg(err?.message || "Failed to place order.");
+      setMsgType("error");
     } finally {
       setBusy(false);
     }
@@ -108,7 +114,11 @@ export default function Checkout() {
       </p>
 
       {msg && (
-        <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-700 text-sm">
+        <div className={`mt-4 rounded-lg px-4 py-3 text-sm ${
+          msgType === "success"
+            ? "border border-emerald-200 bg-emerald-50 text-emerald-700"
+            : "border border-red-200 bg-red-50 text-red-700"
+        }`}>
           {msg}
         </div>
       )}

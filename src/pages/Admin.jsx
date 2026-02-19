@@ -1,5 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import {
+  BarElement,
+  CategoryScale,
+  Chart as ChartJS,
+  Filler,
+  Legend,
+  LineElement,
+  LinearScale,
+  PointElement,
+  Tooltip,
+} from "chart.js";
+import { Bar, Line } from "react-chartjs-2";
 import { supabase } from "../supabaseClient";
 
 const ORDER_STATUSES = ["To Ship", "Out for Delivery", "Completed", "Cancelled"];
@@ -8,6 +20,17 @@ const DEFAULT_CATEGORIES = ["Notebooks", "Pens", "Pencils", "Paper", "Accessorie
 const CATEGORY_ALIASES = {
   accesories: "accessories",
 };
+
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  BarElement,
+  Tooltip,
+  Legend,
+  Filler
+);
 
 function money(n) {
   return `₱${Number(n || 0).toFixed(2)}`;
@@ -143,7 +166,7 @@ function getProductNamesFor(o) {
 export default function Admin() {
   const nav = useNavigate();
 
-  const [tab, setTab] = useState("products"); // dashboard | products | orders | payments | users | sales
+  const [tab, setTab] = useState("dashboard"); // dashboard | products | orders | payments | users | sales
   const [msg, setMsg] = useState({ type: "", text: "" });
 
   // auth + role
@@ -201,6 +224,7 @@ export default function Admin() {
   const [deliveryDraftByOrderId, setDeliveryDraftByOrderId] = useState({});
   const [completingOrderId, setCompletingOrderId] = useState(null);
   const [deliveryHistory, setDeliveryHistory] = useState([]);
+  const [deliveryHistoryHydrated, setDeliveryHistoryHydrated] = useState(false);
   const [showDeliveryHistory, setShowDeliveryHistory] = useState(false);
   const [salesProductCategory, setSalesProductCategory] = useState("All");
   const [salesDateRange, setSalesDateRange] = useState("All");
@@ -265,21 +289,25 @@ export default function Admin() {
   useEffect(() => {
     try {
       const raw = localStorage.getItem("admin_delivery_history");
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) setDeliveryHistory(parsed);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) setDeliveryHistory(parsed);
+      }
     } catch {
       // ignore storage parse errors
+    } finally {
+      setDeliveryHistoryHydrated(true);
     }
   }, []);
 
   useEffect(() => {
+    if (!deliveryHistoryHydrated) return;
     try {
       localStorage.setItem("admin_delivery_history", JSON.stringify(deliveryHistory));
     } catch {
       // ignore storage write errors
     }
-  }, [deliveryHistory]);
+  }, [deliveryHistory, deliveryHistoryHydrated]);
 
   // Close user menu on outside click
   useEffect(() => {
@@ -1120,21 +1148,11 @@ export default function Admin() {
     return products;
   }, [soldProducts, salesProductCategory, showBestBuysOnly]);
 
-  const salesTrend = useMemo(() => {
-    // Get last 12 months rolling from today
+  const monthTrend = useMemo(() => {
     const now = new Date();
     const monthData = Array(12).fill(0);
-    const labels = [];
-
-    // Create labels and initialize data for last 12 months
-    for (let i = 11; i >= 0; i -= 1) {
-      const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const monthName = date.toLocaleDateString(undefined, { month: "short" });
-      labels.push(monthName);
-    }
-
-    // Map orders by month (last 12 months)
     const monthMap = {};
+
     for (let i = 11; i >= 0; i -= 1) {
       const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const key = `${date.getFullYear()}-${date.getMonth()}`;
@@ -1145,15 +1163,13 @@ export default function Admin() {
       if (!order?.created_at) continue;
       const date = new Date(order.created_at);
       if (Number.isNaN(date.getTime())) continue;
-      const key = `${date.getFullYear()}-${date.getMonth()}`;
-      const amount = Number(order.total || 0);
 
-      if (monthMap.hasOwnProperty(key)) {
-        monthMap[key] += amount;
+      const key = `${date.getFullYear()}-${date.getMonth()}`;
+      if (Object.prototype.hasOwnProperty.call(monthMap, key)) {
+        monthMap[key] += Number(order.total || 0);
       }
     }
 
-    // Fill monthData array from oldest to newest (last 12 months)
     let idx = 0;
     for (let i = 11; i >= 0; i -= 1) {
       const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
@@ -1162,103 +1178,58 @@ export default function Admin() {
       idx += 1;
     }
 
-    return { labels, monthData };
+    return monthData;
   }, [salesOrders]);
 
-  const salesTrendMax = useMemo(
-    () => Math.max(...salesTrend.monthData, 1),
-    [salesTrend]
-  );
+  const dayTrend = useMemo(() => {
+    const now = new Date();
+    const dayData = Array(12).fill(0);
+    const dayMap = {};
 
-  const salesTrendChart = useMemo(() => {
-    const width = 560;
-    const height = 220;
-    const padLeft = 34;
-    const padRight = 16;
-    const padTop = 16;
-    const padBottom = 34;
-    const innerWidth = width - padLeft - padRight;
-    const innerHeight = height - padTop - padBottom;
+    for (let i = 11; i >= 0; i -= 1) {
+      const date = new Date(now);
+      date.setHours(0, 0, 0, 0);
+      date.setDate(now.getDate() - i);
+      const key = date.toISOString().slice(0, 10);
+      dayMap[key] = 0;
+    }
 
-    const toX = (index) => {
-      if (salesTrend.labels.length <= 1) return padLeft;
-      return padLeft + (index / (salesTrend.labels.length - 1)) * innerWidth;
-    };
+    for (const order of salesOrders) {
+      if (!order?.created_at) continue;
+      const date = new Date(order.created_at);
+      if (Number.isNaN(date.getTime())) continue;
 
-    const toY = (value) => padTop + innerHeight - (value / salesTrendMax) * innerHeight;
-
-    // Generate smooth curved paths using Catmull-Rom spline interpolation
-    const generateSmoothPath = (series) => {
-      if (series.length === 0) return "";
-      if (series.length === 1) return `M ${toX(0)},${toY(series[0])}`;
-
-      const points = series.map((value, index) => ({
-        x: toX(index),
-        y: toY(value),
-      }));
-
-      // Catmull-Rom spline: creates smooth curve through all points
-      const catmullRom = (t, p0, p1, p2, p3) => {
-        const t2 = t * t;
-        const t3 = t2 * t;
-        const tension = 0.5;
-        return (
-          0.5 *
-          (2 * p1 +
-            (-p0 + p2) * t +
-            (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 +
-            (-p0 + 3 * p1 - 3 * p2 + p3) * t3)
-        );
-      };
-
-      let path = `M ${points[0].x},${points[0].y}`;
-      const resolution = 10; // Points per segment for smooth interpolation
-
-      for (let i = 0; i < points.length - 1; i++) {
-        const p0 = points[Math.max(0, i - 1)];
-        const p1 = points[i];
-        const p2 = points[i + 1];
-        const p3 = points[Math.min(points.length - 1, i + 2)];
-
-        for (let t = 0; t <= 1; t += 1 / resolution) {
-          const x = catmullRom(t, p0.x, p1.x, p2.x, p3.x);
-          const y = catmullRom(t, p0.y, p1.y, p2.y, p3.y);
-          path += ` L ${x.toFixed(2)},${y.toFixed(2)}`;
-        }
+      const day = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+      const key = day.toISOString().slice(0, 10);
+      if (Object.prototype.hasOwnProperty.call(dayMap, key)) {
+        dayMap[key] += Number(order.total || 0);
       }
-      path += ` L ${points[points.length - 1].x},${points[points.length - 1].y}`;
+    }
 
-      return path;
-    };
+    let idx = 0;
+    for (let i = 11; i >= 0; i -= 1) {
+      const date = new Date(now);
+      date.setHours(0, 0, 0, 0);
+      date.setDate(now.getDate() - i);
+      const key = date.toISOString().slice(0, 10);
+      dayData[idx] = dayMap[key] || 0;
+      idx += 1;
+    }
 
-    const currentPath = generateSmoothPath(salesTrend.monthData);
+    return dayData;
+  }, [salesOrders]);
 
-    const dataPoints = salesTrend.monthData.map((value, index) => ({
-      x: toX(index),
-      y: toY(value),
-    }));
-
-    const xTicks = salesTrend.labels.map((label, index) => ({ label, x: toX(index) }));
-    const yTicks = [0, 0.25, 0.5, 0.75, 1].map((ratio) => ({
-      y: padTop + innerHeight * (1 - ratio),
-      value: Math.round(salesTrendMax * ratio),
-    }));
-
-    return {
-      width,
-      height,
-      padLeft,
-      padRight,
-      padTop,
-      padBottom,
-      innerWidth,
-      innerHeight,
-      currentPath,
-      dataPoints,
-      xTicks,
-      yTicks,
-    };
-  }, [salesTrend, salesTrendMax]);
+  const trendDateLabels = useMemo(() => {
+    const now = new Date();
+    const labels = [];
+    for (let i = 11; i >= 0; i -= 1) {
+      const date = new Date(now);
+      date.setHours(0, 0, 0, 0);
+      date.setDate(now.getDate() - i);
+      labels.push(date.toLocaleDateString(undefined, { month: "short", day: "numeric" }));
+    }
+    return labels;
+  }, []);
 
   const totalRevenueAll = useMemo(
     () => salesOrders.reduce((sum, order) => sum + Number(order.total || 0), 0),
@@ -1313,9 +1284,184 @@ export default function Admin() {
     }));
   }, [orders]);
 
-  const usersVisitMax = useMemo(
-    () => Math.max(...usersVisitSeries.map((d) => d.value), 1),
+  const dashboardSalesTrendData = useMemo(
+    () => ({
+      labels: trendDateLabels,
+      datasets: [
+        {
+          label: "Last 12 Months",
+          data: monthTrend,
+          borderColor: "rgb(5, 150, 105)",
+          backgroundColor: "rgba(5, 150, 105, 0.15)",
+          fill: true,
+          tension: 0.35,
+          pointRadius: 3,
+          pointHoverRadius: 5,
+          borderWidth: 2,
+        },
+        {
+          label: "Last 12 Days",
+          data: dayTrend,
+          borderColor: "rgb(59, 130, 246)",
+          backgroundColor: "rgba(59, 130, 246, 0.15)",
+          fill: true,
+          tension: 0.35,
+          pointRadius: 3,
+          pointHoverRadius: 5,
+          borderWidth: 2,
+        },
+      ],
+    }),
+    [monthTrend, dayTrend, trendDateLabels]
+  );
+
+  const dashboardSalesTrendOptions = useMemo(
+    () => ({
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: true, position: "top" },
+        tooltip: {
+          callbacks: {
+            title: (ctx) => ctx[0]?.label || "",
+            label: (ctx) => `${ctx.dataset.label}: ${money(ctx.parsed.y)}`,
+          },
+        },
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { display: false } },
+        y: {
+          beginAtZero: true,
+          ticks: {
+            display: false,
+            callback: (value) => money(value),
+          },
+        },
+      },
+    }),
+    []
+  );
+
+  const dashboardUsersVisitData = useMemo(
+    () => ({
+      labels: usersVisitSeries.map((point) => point.label),
+      datasets: [
+        {
+          label: "Unique Visitors",
+          data: usersVisitSeries.map((point) => point.value),
+          backgroundColor: "rgba(16, 185, 129, 0.85)",
+          borderRadius: 6,
+        },
+      ],
+    }),
     [usersVisitSeries]
+  );
+
+  const dashboardUsersVisitOptions = useMemo(
+    () => ({
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+      },
+      scales: {
+        x: { grid: { display: false } },
+        y: {
+          beginAtZero: true,
+          ticks: { display: false, precision: 0 },
+        },
+      },
+    }),
+    []
+  );
+
+  const salesByDayChartData = useMemo(
+    () => ({
+      labels: salesByDay.map((entry) => entry.day),
+      datasets: [
+        {
+          label: "Income",
+          data: salesByDay.map((entry) => entry.amount),
+          backgroundColor: "rgba(5, 150, 105, 0.85)",
+          borderRadius: 6,
+        },
+      ],
+    }),
+    [salesByDay]
+  );
+
+  const salesByCategoryChartData = useMemo(
+    () => ({
+      labels: salesByCategory.map((entry) => entry.category),
+      datasets: [
+        {
+          label: "Income",
+          data: salesByCategory.map((entry) => entry.amount),
+          backgroundColor: "rgba(37, 99, 235, 0.85)",
+          borderRadius: 6,
+        },
+      ],
+    }),
+    [salesByCategory]
+  );
+
+  const salesByBarangayChartData = useMemo(
+    () => ({
+      labels: salesByBarangay.map((entry) => entry.barangay),
+      datasets: [
+        {
+          label: "Buyers",
+          data: salesByBarangay.map((entry) => entry.count),
+          backgroundColor: "rgba(124, 58, 237, 0.85)",
+          borderRadius: 6,
+        },
+      ],
+    }),
+    [salesByBarangay]
+  );
+
+  const salesCurrencyBarOptions = useMemo(
+    () => ({
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => `Income: ${money(ctx.parsed.y)}`,
+          },
+        },
+      },
+      scales: {
+        x: { grid: { display: false } },
+        y: {
+          beginAtZero: true,
+          ticks: {
+            display: false,
+            callback: (value) => money(value),
+          },
+        },
+      },
+    }),
+    []
+  );
+
+  const salesCountBarOptions = useMemo(
+    () => ({
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+      },
+      scales: {
+        x: { grid: { display: false } },
+        y: {
+          beginAtZero: true,
+          ticks: { display: false, precision: 0 },
+        },
+      },
+    }),
+    []
   );
 
   useEffect(() => {
@@ -1534,122 +1680,69 @@ export default function Admin() {
         {/* DASHBOARD */}
         {tab === "dashboard" && (
           <div className="mt-0 space-y-6">
-            <div className="bg-white border rounded-2xl shadow-sm p-5">
-              <div className="flex items-center justify-between gap-3">
-                <h2 className="text-lg font-bold">Dashboard</h2>
-                <div className="text-sm text-gray-600">Analytics Overview</div>
+            <div className="bg-white border border-emerald-100 rounded-2xl shadow-sm p-5 sm:p-6">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-bold text-gray-900">Dashboard</h2>
+                </div>
+                <span className="px-3 py-1 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">
+                  Live Data
+                </span>
               </div>
 
-              <div className="mt-5 space-y-6">
-                <div className="border rounded-2xl p-4 bg-emerald-50/40">
-                  <h3 className="text-sm font-semibold text-gray-700">Sales Trend</h3>
-                  <div className="mt-2 flex items-center gap-4 text-xs text-gray-600">
-                    <div className="flex items-center gap-1.5">
-                      <span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-600" />
-                      Last 12 Months
-                    </div>
-                  </div>
-                  <div className="mt-3 overflow-x-auto">
-                    <svg
-                      viewBox={`0 0 ${salesTrendChart.width} ${salesTrendChart.height}`}
-                      className="w-full min-w-95 h-56"
-                    >
-                      {salesTrendChart.yTicks.map((tick) => (
-                        <g key={`grid-${tick.value}`}>
-                          <line
-                            x1={salesTrendChart.padLeft}
-                            y1={tick.y}
-                            x2={salesTrendChart.width - salesTrendChart.padRight}
-                            y2={tick.y}
-                            stroke="rgb(226 232 240)"
-                            strokeWidth="1"
-                          />
-                          <text
-                            x={salesTrendChart.padLeft - 6}
-                            y={tick.y + 4}
-                            textAnchor="end"
-                            fontSize="10"
-                            fill="rgb(107 114 128)"
-                          >
-                            {money(tick.value)}
-                          </text>
-                        </g>
-                      ))}
-
-                      <path
-                        fill="none"
-                        stroke="rgb(5 150 105)"
-                        strokeWidth="2.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d={salesTrendChart.currentPath}
-                      />
-
-                      {salesTrendChart.dataPoints.map((point, index) => (
-                        <circle
-                          key={`dot-${index}`}
-                          cx={point.x}
-                          cy={point.y}
-                          r="3.5"
-                          fill="rgb(5 150 105)"
-                          stroke="white"
-                          strokeWidth="2"
-                        />
-                      ))}
-
-                      {salesTrendChart.xTicks.map((tick) => (
-                        <text
-                          key={`x-${tick.label}`}
-                          x={tick.x}
-                          y={salesTrendChart.height - 10}
-                          textAnchor="middle"
-                          fontSize="10"
-                          fill="rgb(107 114 128)"
-                        >
-                          {tick.label}
-                        </text>
-                      ))}
-                    </svg>
+              <div className="mt-6 space-y-4">
+                <div className="border border-emerald-100 rounded-2xl p-5 sm:p-6 bg-emerald-50/40">
+                  <h3 className="text-sm font-semibold text-gray-700 tracking-wide">Sales Trend Comparison</h3>
+                  <p className="text-xs text-gray-600 mt-1">Comparing last 12 months vs last 12 days</p>
+                  <div className="mt-4 h-80">
+                    <Line data={dashboardSalesTrendData} options={dashboardSalesTrendOptions} />
                   </div>
                 </div>
 
-                <div className="border rounded-2xl p-4 bg-teal-50/40">
-                  <h3 className="text-sm font-semibold text-gray-700">Users Visit Analytics</h3>
-                  <div className="mt-4 h-44 flex items-end gap-2">
-                    {usersVisitSeries.map((point) => {
-                      const height = Math.max(16, Math.round((point.value / usersVisitMax) * 130));
-                      return (
-                        <div key={point.key} className="flex-1 min-w-0 flex flex-col items-center justify-end gap-2">
-                          <div className="text-[11px] text-gray-500">{point.value}</div>
-                          <div
-                            className="w-full rounded-t-md bg-emerald-500/80"
-                            style={{ height: `${height}px` }}
-                            title={`${point.label}: ${point.value}`}
-                          />
-                          <div className="text-[11px] text-gray-500 truncate w-full text-center">{point.label}</div>
-                        </div>
-                      );
-                    })}
+                <div className="border border-teal-100 rounded-2xl p-5 sm:p-6 bg-teal-50/40">
+                  <h3 className="text-sm font-semibold text-gray-700 tracking-wide">Users Visit Analytics</h3>
+                  <div className="mt-4 h-64">
+                    <Bar data={dashboardUsersVisitData} options={dashboardUsersVisitOptions} />
                   </div>
                 </div>
               </div>
 
-              <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
-                <div className="rounded-xl border bg-white p-4 shadow-sm">
-                  <div className="text-xs text-gray-500">Total Revenue</div>
-                  <div className="text-xl font-semibold mt-1">{money(totalRevenueAll)}</div>
+              <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                <div className="rounded-xl border border-emerald-100 bg-white p-4 shadow-sm">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="text-xs font-medium text-gray-500">Total Revenue</div>
+                    <span className="h-7 w-7 rounded-full bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-700">
+                      ₱
+                    </span>
+                  </div>
+                  <div className="text-xl font-semibold mt-2 text-gray-900">{money(totalRevenueAll)}</div>
                 </div>
-                <div className="rounded-xl border bg-white p-4 shadow-sm">
-                  <div className="text-xs text-gray-500">Total Order</div>
-                  <div className="text-xl font-semibold mt-1">{orders.length}</div>
+                <div className="rounded-xl border border-sky-100 bg-white p-4 shadow-sm">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="text-xs font-medium text-gray-500">Total Orders</div>
+                    <span className="h-7 w-7 rounded-full bg-sky-50 border border-sky-100 flex items-center justify-center text-sky-700">
+                      #
+                    </span>
+                  </div>
+                  <div className="text-xl font-semibold mt-2 text-gray-900">{orders.length}</div>
                 </div>
-                <div className="rounded-xl border bg-white p-4 shadow-sm">
-                  <div className="text-xs text-gray-500">New Customers</div>
-                  <div className="text-xl font-semibold mt-1">{newCustomersCount}</div>
+                <div className="rounded-xl border border-violet-100 bg-white p-4 shadow-sm">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="text-xs font-medium text-gray-500">New Customers</div>
+                    <span className="h-7 w-7 rounded-full bg-violet-50 border border-violet-100 flex items-center justify-center text-violet-700">
+                      +
+                    </span>
+                  </div>
+                  <div className="text-xl font-semibold mt-2 text-gray-900">{newCustomersCount}</div>
                 </div>
-                <div className="rounded-xl border bg-white p-4 shadow-sm">
-                  <div className="text-xs text-gray-500">Total Deliveries</div>
-                  <div className="text-xl font-semibold mt-1">{salesOrders.length}</div>
+                <div className="rounded-xl border border-amber-100 bg-white p-4 shadow-sm">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="text-xs font-medium text-gray-500">Total Deliveries</div>
+                    <span className="h-7 w-7 rounded-full bg-amber-50 border border-amber-100 flex items-center justify-center text-amber-700">
+                      ✓
+                    </span>
+                  </div>
+                  <div className="text-xl font-semibold mt-2 text-gray-900">{salesOrders.length}</div>
                 </div>
               </div>
             </div>
@@ -1659,46 +1752,56 @@ export default function Admin() {
         {/* PRODUCTS */}
         {tab === "products" && (
           <div className="mt-0">
-            <div className="bg-white border rounded-2xl shadow-sm p-5">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <h2 className="text-lg font-bold">
-                    Products {lowStockOnly ? "(Low Stock)" : ""}
-                  </h2>
-                  <span className="px-3 py-1 text-sm font-semibold rounded-full bg-emerald-100 text-emerald-700">
-                    {filteredProducts.length} Total
-                  </span>
+            <div className="bg-white border border-emerald-100 rounded-2xl shadow-sm p-5 sm:p-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6">
+                <div>
+                  <div className="flex items-center gap-3">
+                    <h2 className="text-2xl font-bold text-gray-900">
+                      Products {lowStockOnly && <span className="text-sm text-amber-600 font-medium">(Low Stock)</span>}
+                    </h2>
+                    <span className="px-3 py-1 text-sm font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">
+                      {filteredProducts.length}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
+                  <div className="relative flex-1 sm:flex-none">
+                    <input
+                      value={pSearch}
+                      onChange={(e) => setPSearch(e.target.value)}
+                      placeholder="Search products..."
+                      className="w-full sm:w-72 px-4 py-2.5 pl-10 rounded-lg border border-gray-300 text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent hover:border-gray-400 transition"
+                    />
+                    <svg className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                  </div>
                   <button
                     type="button"
                     onClick={() => setShowProductForm(true)}
-                    className="h-10 px-3 rounded-lg border bg-white hover:bg-gray-50 text-sm font-medium"
+                    className="px-4 py-2.5 rounded-lg bg-emerald-700 text-white font-medium text-sm hover:bg-emerald-800 transition flex items-center justify-center gap-2 shrink-0"
                   >
-                    {editingProductId ? "Edit Product" : "Add Product"}
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    </svg>
+                    {editingProductId ? "Edit" : "Add Product"}
                   </button>
-                  <input
-                    value={pSearch}
-                    onChange={(e) => setPSearch(e.target.value)}
-                    placeholder="Search products..."
-                    className="h-10 px-3 rounded-lg border w-64 max-w-full"
-                  />
                 </div>
               </div>
 
               {pLoading ? (
-                <div className="py-10 text-center text-gray-600">Loading products…</div>
+                <div className="py-16 text-center text-gray-600">Loading products…</div>
               ) : filteredProducts.length === 0 ? (
-                <div className="py-10 text-center text-gray-600">No products found.</div>
+                <div className="py-16 text-center text-gray-600">No products found.</div>
               ) : (
-                <div className="mt-4 max-h-150 overflow-y-auto pr-2">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 justify-items-center">
+                <div className="mt-6 max-h-150 overflow-y-auto pr-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     {filteredProducts.map((p) => (
                     <div
                       key={p.id}
-                      className="w-full max-w-sm border rounded-2xl overflow-hidden bg-white shadow-sm flex flex-col"
+                      className="border border-gray-200 rounded-2xl overflow-hidden bg-white hover:shadow-md transition flex flex-col"
                     >
-                      <div className="h-40 bg-gray-100 flex items-center justify-center overflow-hidden">
+                      <div className="h-48 bg-gray-100 flex items-center justify-center overflow-hidden shrink-0">
                         {p.image_url ? (
                           <img src={p.image_url} alt={p.name} className="w-full h-full object-cover" />
                         ) : (
@@ -1706,46 +1809,36 @@ export default function Admin() {
                         )}
                       </div>
 
-                      <div className="p-4 flex flex-col flex-1">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <h3 className="font-semibold leading-tight truncate">{p.name}</h3>
-                            <p className="text-xs text-gray-600 mt-1 truncate">{p.category}</p>
+                      <div className="p-4 sm:p-5 flex flex-col flex-1">
+                        <div className="flex items-start justify-between gap-2 mb-2">
+                          <div className="min-w-0 flex-1">
+                            <h3 className="font-semibold text-gray-900 leading-tight truncate">{p.name}</h3>
+                            <p className="text-xs text-gray-600 mt-1">{p.category}</p>
                           </div>
-                          <div className="text-xs text-gray-600 shrink-0">Stock: {p.stock ?? 0}</div>
-                        </div>
-
-                        {p.description && (
-                          <p className="mt-2 text-sm text-gray-700 line-clamp-3">{p.description}</p>
-                        )}
-
-                        <div className="mt-auto pt-3 flex items-center justify-between">
-                          <div className="font-semibold">{money(p.price)}</div>
-
-                          <div className="relative">
+                          <div className="relative shrink-0">
                             <button
                               type="button"
                               onClick={() => setProductMenuOpen(productMenuOpen === p.id ? null : p.id)}
-                              className="p-2 hover:bg-gray-100 rounded-lg transition"
+                              className="p-1.5 hover:bg-gray-100 rounded-lg transition"
                               title="Actions"
                             >
-                              <svg className="w-5 h-5 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
+                              <svg className="w-4 h-4 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
                                 <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
                               </svg>
                             </button>
                             {productMenuOpen === p.id && (
-                              <div className="user-menu-dropdown absolute right-0 bottom-full mb-1 w-36 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
+                              <div className="user-menu-dropdown absolute right-0 top-full mt-1 w-32 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
                                 <button
                                   type="button"
                                   onClick={() => startEditProduct(p)}
-                                  className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 rounded-t-lg"
+                                  className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 rounded-t-lg"
                                 >
                                   Edit
                                 </button>
                                 <button
                                   type="button"
                                   onClick={() => removeProduct(p.id)}
-                                  className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 border-t rounded-b-lg"
+                                  className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 border-t rounded-b-lg"
                                 >
                                   Delete
                                 </button>
@@ -1754,7 +1847,24 @@ export default function Admin() {
                           </div>
                         </div>
 
-                        <div className="mt-2 text-xs text-gray-500">ID: {p.id}</div>
+                        {p.description && (
+                          <p className="text-xs text-gray-600 line-clamp-2 mb-3">{p.description}</p>
+                        )}
+
+                        <div className="mt-auto space-y-3">
+                          <div className="flex items-center justify-between">
+                            <div className="text-lg font-bold text-emerald-700">{money(p.price)}</div>
+                            <div className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
+                              (p.stock ?? 0) <= 5
+                                ? "bg-red-50 text-red-700 border border-red-100"
+                                : "bg-emerald-50 text-emerald-700 border border-emerald-100"
+                            }`}>
+                              Stock: {p.stock ?? 0}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="mt-2 text-[10px] text-gray-400">ID: {p.id}</div>
                       </div>
                     </div>
                   ))}
@@ -1765,201 +1875,239 @@ export default function Admin() {
 
             {showProductForm && (
               <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-                <div className="absolute inset-0 bg-black/40" onClick={cancelEdit} />
-                <div className="relative w-full max-w-xl bg-white border rounded-2xl shadow-xl p-5 max-h-[85vh] overflow-y-auto">
-                  <div className="flex items-center justify-between gap-3">
-                    <h2 className="text-lg font-bold">{editingProductId ? "Edit product" : "Add product"}</h2>
+                <div className="absolute inset-0 bg-black/50" onClick={cancelEdit} />
+                <div className="relative w-full max-w-2xl bg-white border border-emerald-100 rounded-2xl shadow-2xl p-6 sm:p-8 max-h-[90vh] overflow-y-auto">
+                  <div className="flex items-start justify-between gap-4 mb-6">
+                    <div>
+                      <h2 className="text-xl font-bold text-gray-900">{editingProductId ? "Edit Product" : "Add New Product"}</h2>
+                      <p className="text-sm text-gray-600 mt-1">{editingProductId ? "Update product details" : "Create a new product listing"}</p>
+                    </div>
                     <button
                       type="button"
                       onClick={cancelEdit}
-                      className="px-3 py-2 rounded-lg border hover:bg-gray-50"
+                      className="p-2 hover:bg-gray-100 rounded-lg transition shrink-0"
+                      title="Close"
                     >
-                      Close
+                      <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
                     </button>
                   </div>
 
-                  <form className="mt-4 space-y-3" onSubmit={addProduct}>
-                    <div>
-                      <label className="text-sm font-medium">Name</label>
-                      <input
-                        value={form.name}
-                        onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                        className="mt-1 w-full px-3 py-2 rounded-lg border"
-                        required
-                      />
-                    </div>
-
-                    <div>
-                      <label className="text-sm font-medium">Description</label>
-                      <textarea
-                        value={form.description}
-                        onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-                        className="mt-1 w-full px-3 py-2 rounded-lg border min-h-22.5"
-                      />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
+                  <form className="space-y-6" onSubmit={addProduct}>
+                    {/* Basic Info Section */}
+                    <div className="space-y-4 pb-4 border-b border-gray-200">
+                      <h3 className="text-sm font-semibold text-gray-900">Basic Information</h3>
+                      
                       <div>
-                        <label className="text-sm font-medium">Price</label>
+                        <label className="block text-sm font-medium text-gray-700">Product Name *</label>
                         <input
-                          value={form.price}
-                          onChange={(e) => setForm((f) => ({ ...f, price: e.target.value }))}
-                          className="mt-1 w-full px-3 py-2 rounded-lg border"
-                          type="number"
-                          step="0.01"
-                          min="0"
+                          value={form.name}
+                          onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                          className="mt-2 w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                          placeholder="e.g., Blue Notebook"
                           required
                         />
                       </div>
+
                       <div>
-                        <label className="text-sm font-medium">Stock</label>
-                        <input
-                          value={form.stock}
-                          onChange={(e) => setForm((f) => ({ ...f, stock: e.target.value }))}
-                          className="mt-1 w-full px-3 py-2 rounded-lg border"
-                          type="number"
-                          step="1"
-                          min="0"
-                          required
+                        <label className="block text-sm font-medium text-gray-700">Description</label>
+                        <textarea
+                          value={form.description}
+                          onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+                          className="mt-2 w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent min-h-24 resize-none"
+                          placeholder="Add product details and features..."
                         />
                       </div>
                     </div>
 
-                    <div>
-                      <label className="text-sm font-medium">Category</label>
-                      <input
-                        list="admin-category-list"
-                        value={form.category}
-                        onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
-                        className="mt-1 w-full px-3 py-2 rounded-lg border bg-white"
-                        placeholder="Type or select a category"
-                      />
-                      <datalist id="admin-category-list">
-                        {categories.map((c) => (
-                          <option key={c} value={c} />
-                        ))}
-                      </datalist>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="text-sm font-medium">Length options (optional)</label>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {LENGTH_PRESETS.map((opt) => (
-                            <button
-                              key={opt}
-                              type="button"
-                              onClick={() => toggleOption("length_options", opt)}
-                              className={`px-3 py-1.5 rounded-full text-xs border transition ${
-                                form.length_options.includes(opt)
-                                  ? "bg-emerald-50 border-emerald-200 text-emerald-800"
-                                  : "bg-white border-gray-200 text-gray-700 hover:bg-emerald-50/70"
-                              }`}
-                            >
-                              {opt}
-                            </button>
-                          ))}
-                        </div>
-
-                        <div className="mt-2 flex items-center gap-2">
+                    {/* Price & Stock Section */}
+                    <div className="space-y-4 pb-4 border-b border-gray-200">
+                      <h3 className="text-sm font-semibold text-gray-900">Pricing & Inventory</h3>
+                      
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700">Price (₱) *</label>
                           <input
-                            value={customLength}
-                            onChange={(e) => setCustomLength(e.target.value)}
-                            className="h-10 px-3 rounded-lg border w-full sm:w-40"
-                            placeholder="Custom"
+                            value={form.price}
+                            onChange={(e) => setForm((f) => ({ ...f, price: e.target.value }))}
+                            className="mt-2 w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            placeholder="0.00"
+                            required
                           />
-                          <button
-                            type="button"
-                            onClick={() => {
-                              addCustomOption("length_options", customLength);
-                              setCustomLength("");
-                            }}
-                            className="h-10 px-4 rounded-lg border bg-white hover:bg-gray-50 text-sm shrink-0"
-                          >
-                            Add
-                          </button>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700">Stock Quantity *</label>
+                          <input
+                            value={form.stock}
+                            onChange={(e) => setForm((f) => ({ ...f, stock: e.target.value }))}
+                            className="mt-2 w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                            type="number"
+                            step="1"
+                            min="0"
+                            placeholder="0"
+                            required
+                          />
                         </div>
                       </div>
 
                       <div>
-                        <label className="text-sm font-medium">Color options (optional)</label>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {COLOR_PRESETS.map((opt) => (
-                            <button
-                              key={opt}
-                              type="button"
-                              onClick={() => toggleOption("color_options", opt)}
-                              className={`px-3 py-1.5 rounded-full text-xs border transition ${
-                                form.color_options.includes(opt)
-                                  ? "bg-emerald-50 border-emerald-200 text-emerald-800"
-                                  : "bg-white border-gray-200 text-gray-700 hover:bg-emerald-50/70"
-                              }`}
-                            >
-                              {opt}
-                            </button>
+                        <label className="block text-sm font-medium text-gray-700">Category *</label>
+                        <input
+                          list="admin-category-list"
+                          value={form.category}
+                          onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
+                          className="mt-2 w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent bg-white"
+                          placeholder="Select or type category..."
+                          required
+                        />
+                        <datalist id="admin-category-list">
+                          {categories.map((c) => (
+                            <option key={c} value={c} />
                           ))}
+                        </datalist>
+                      </div>
+                    </div>
+
+                    {/* Options Section */}
+                    <div className="space-y-4 pb-4 border-b border-gray-200">
+                      <h3 className="text-sm font-semibold text-gray-900">Product Options</h3>
+                      
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-3">Length Options</label>
+                          <div className="flex flex-wrap gap-2 mb-3">
+                            {LENGTH_PRESETS.map((opt) => (
+                              <button
+                                key={opt}
+                                type="button"
+                                onClick={() => toggleOption("length_options", opt)}
+                                className={`px-3 py-1.5 rounded-full text-xs font-medium border transition ${
+                                  form.length_options.includes(opt)
+                                    ? "bg-emerald-50 border-emerald-300 text-emerald-700"
+                                    : "bg-white border-gray-200 text-gray-600 hover:border-emerald-200 hover:bg-emerald-50/30"
+                                }`}
+                              >
+                                {opt}
+                              </button>
+                            ))}
+                          </div>
+
+                          <div className="flex gap-2">
+                            <input
+                              value={customLength}
+                              onChange={(e) => setCustomLength(e.target.value)}
+                              className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                              placeholder="Custom..."
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                addCustomOption("length_options", customLength);
+                                setCustomLength("");
+                              }}
+                              className="px-3 py-2 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 text-sm font-medium transition"
+                            >
+                              Add
+                            </button>
+                          </div>
                         </div>
 
-                        <div className="mt-2 flex items-center gap-2">
-                          <input
-                            value={customColor}
-                            onChange={(e) => setCustomColor(e.target.value)}
-                            className="h-10 px-3 rounded-lg border w-full sm:w-40"
-                            placeholder="Custom"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => {
-                              addCustomOption("color_options", customColor);
-                              setCustomColor("");
-                            }}
-                            className="h-10 px-4 rounded-lg border bg-white hover:bg-gray-50 text-sm shrink-0"
-                          >
-                            Add
-                          </button>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-3">Color Options</label>
+                          <div className="flex flex-wrap gap-2 mb-3">
+                            {COLOR_PRESETS.map((opt) => (
+                              <button
+                                key={opt}
+                                type="button"
+                                onClick={() => toggleOption("color_options", opt)}
+                                className={`px-3 py-1.5 rounded-full text-xs font-medium border transition ${
+                                  form.color_options.includes(opt)
+                                    ? "bg-emerald-50 border-emerald-300 text-emerald-700"
+                                    : "bg-white border-gray-200 text-gray-600 hover:border-emerald-200 hover:bg-emerald-50/30"
+                                }`}
+                              >
+                                {opt}
+                              </button>
+                            ))}
+                          </div>
+
+                          <div className="flex gap-2">
+                            <input
+                              value={customColor}
+                              onChange={(e) => setCustomColor(e.target.value)}
+                              className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                              placeholder="Custom..."
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                addCustomOption("color_options", customColor);
+                                setCustomColor("");
+                              }}
+                              className="px-3 py-2 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 text-sm font-medium transition"
+                            >
+                              Add
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>
 
-                    <div>
-                      <label className="text-sm font-medium">Image URL (optional)</label>
-                      <input
-                        value={form.image_url}
-                        onChange={(e) => setForm((f) => ({ ...f, image_url: e.target.value }))}
-                        className="mt-1 w-full px-3 py-2 rounded-lg border"
-                        placeholder="https://..."
-                      />
+                    {/* Image Section */}
+                    <div className="space-y-4 pb-4 border-b border-gray-200">
+                      <h3 className="text-sm font-semibold text-gray-900">Product Image</h3>
+                      
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">Image URL</label>
+                        <input
+                          value={form.image_url}
+                          onChange={(e) => setForm((f) => ({ ...f, image_url: e.target.value }))}
+                          className="mt-2 w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-sm"
+                          placeholder="https://example.com/image.jpg"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">Upload Image</label>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="mt-2 block w-full text-sm rounded-lg border border-gray-200 bg-white
+                             file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0
+                             file:bg-emerald-50 file:text-emerald-700 file:font-medium hover:file:bg-emerald-100 transition"
+                          onChange={(e) => setProductImageFile(e.target.files?.[0] || null)}
+                        />
+                      </div>
+
+                      {productImagePreview && (
+                        <div className="mt-3 p-2 border border-gray-200 rounded-lg bg-gray-50">
+                          <img src={productImagePreview} alt="Preview" className="max-h-32 rounded-lg mx-auto" />
+                        </div>
+                      )}
                     </div>
 
-                    <div>
-                      <label className="text-sm font-medium">Image (Choose File)</label>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="mt-1 block w-full text-sm rounded-lg border border-gray-300 bg-white shadow-sm
-                           file:mr-3 file:py-2 file:px-4 file:rounded-md file:border-0
-                           file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200"
-                        onChange={(e) => setProductImageFile(e.target.files?.[0] || null)}
-                      />
-                    </div>
-
-                    <div className="pt-2 flex items-center gap-2">
+                    {/* Actions */}
+                    <div className="flex items-center gap-3 pt-2">
                       <button
                         type="submit"
-                        className="px-4 py-2 rounded-lg bg-black text-white hover:opacity-90 disabled:opacity-60"
+                        className="flex-1 px-4 py-2.5 rounded-lg bg-emerald-700 text-white font-medium hover:bg-emerald-800 disabled:opacity-60 transition"
                         disabled={uploadingProductImage}
                       >
                         {uploadingProductImage
-                          ? "Uploading image…"
+                          ? "Uploading…"
                           : editingProductId
-                          ? "Update product"
-                          : "Add product"}
+                          ? "Update Product"
+                          : "Add Product"}
                       </button>
 
                       <button
                         type="button"
                         onClick={cancelEdit}
-                        className="px-4 py-2 rounded-lg border hover:bg-gray-50"
+                        className="px-4 py-2.5 rounded-lg border border-gray-200 text-gray-700 font-medium hover:bg-gray-50 transition"
                       >
                         Cancel
                       </button>
@@ -1981,198 +2129,142 @@ export default function Admin() {
 
         {/* ORDERS */}
         {tab === "orders" && (
-          <div className="mt-0 bg-white border rounded-2xl shadow-sm p-5">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-lg font-bold">Orders</h2>
-              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-                <select
-                  value={oCategory}
-                  onChange={(e) => setOCategory(e.target.value)}
-                  className="px-3 py-2 rounded-lg border bg-white"
-                >
-                  <option value="All">All</option>
-                  <option value="To Ship">To Ship</option>
-                  <option value="Out for Delivery">Out for Delivery</option>
-                  <option value="Completed">Completed</option>
-                  <option value="Cancelled">Cancelled</option>
-                </select>
+          <div className="mt-0 bg-white border border-emerald-100 rounded-2xl shadow-sm p-6 sm:p-8">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6 mb-6">
+              <div>
+                <h2 className="text-2xl font-bold text-gray-900">Orders</h2>
+                <p className="text-sm text-gray-600 mt-1">Manage and track all customer orders</p>
+              </div>
+              <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+                <div className="relative">
+                  <select
+                    value={oCategory}
+                    onChange={(e) => setOCategory(e.target.value)}
+                    className="appearance-none px-4 py-2.5 pr-10 rounded-lg border border-gray-300 bg-white text-gray-700 font-medium text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent cursor-pointer hover:border-gray-400 transition"
+                  >
+                    <option value="All">All Status</option>
+                    <option value="To Ship">To Ship</option>
+                    <option value="Out for Delivery">Out for Delivery</option>
+                    <option value="Completed">Completed</option>
+                    <option value="Cancelled">Cancelled</option>
+                  </select>
+                  <svg className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-600 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                  </svg>
+                </div>
 
-                <input
-                  value={oSearch}
-                  onChange={(e) => setOSearch(e.target.value)}
-                  placeholder="Search orders..."
-                  className="px-3 py-2 rounded-lg border w-64 max-w-full"
-                />
+                <div className="relative">
+                  <input
+                    value={oSearch}
+                    onChange={(e) => setOSearch(e.target.value)}
+                    placeholder="Search by ID, name..."
+                    className="w-full sm:w-64 px-4 py-2.5 pl-10 rounded-lg border border-gray-300 bg-white text-gray-700 text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent hover:border-gray-400 transition"
+                  />
+                  <svg className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                </div>
               </div>
             </div>
 
             {oLoading ? (
-              <div className="py-10 text-center text-gray-600">Loading orders…</div>
+              <div className="py-16 text-center">
+                <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600"></div>
+                <p className="mt-3 text-gray-600">Loading orders…</p>
+              </div>
             ) : filteredOrders.length === 0 ? (
-              <div className="py-10 text-center text-gray-600">No orders found.</div>
+              <div className="py-16 text-center">
+                <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20 7l-8-4m0 0L4 7m16 0v10l-8 4m0-4L4 7v10l8 4m0 0l8-4v-10" />
+                </svg>
+                <p className="mt-3 text-gray-600">No orders found</p>
+              </div>
             ) : (
-              <div className="mt-4 max-h-150 overflow-y-auto pr-2">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 justify-items-center">
-                  {filteredOrders.map((o) => (
-                  <div
-                    key={o.id}
-                    className="w-full max-w-sm bg-white border rounded-2xl shadow-sm overflow-hidden flex flex-col"
-                  >
-                    <div className="p-4 border-b bg-gray-50/60">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <div className="text-xs text-gray-500">Products</div>
-                          <div className="font-semibold text-gray-900 truncate">{getProductNamesFor(o)}</div>
-                        </div>
-                        <span className="shrink-0 text-xs px-2 py-1 rounded-full border bg-white text-gray-700">
-                          {normalizeOrderStatus(o.status)}
-                        </span>
-                      </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                {filteredOrders.map((o) => {
+                  const statusNorm = normalizeOrderStatus(o.status);
+                  const statusColors = {
+                    "To Ship": "bg-amber-50 border-amber-200 text-amber-700",
+                    "Out for Delivery": "bg-sky-50 border-sky-200 text-sky-700",
+                    "Completed": "bg-emerald-50 border-emerald-200 text-emerald-700",
+                    "Cancelled": "bg-red-50 border-red-200 text-red-700"
+                  };
 
-                      <div className="mt-2 flex items-center justify-between gap-3">
-                        <div className="text-sm text-gray-600">Total</div>
-                        <div className="font-semibold">{money(o.total)}</div>
-                      </div>
-
-                      <div className="mt-2 text-xs text-gray-500">
-                        {o.created_at ? new Date(o.created_at).toLocaleString() : ""}
-                      </div>
-                    </div>
-
-                    <div className="p-4 flex flex-col flex-1">
-                      <div className="flex items-start gap-3">
-                        <div className="min-w-0 flex-1">
-                          <div className="font-semibold text-gray-900 truncate">
-                            {resolvedOrderName(o)}
+                  return (
+                    <div
+                      key={o.id}
+                      className="bg-white border border-gray-200 hover:border-emerald-200 hover:shadow-md rounded-xl overflow-hidden flex flex-col transition-all duration-200"
+                    >
+                      {/* Header */}
+                      <div className="p-5 border-b border-gray-100 bg-linear-to-r from-gray-50 to-white">
+                        <div className="flex items-start justify-between gap-3 mb-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Products</div>
+                            <div className="text-sm font-semibold text-gray-900 truncate mt-0.5">{getProductNamesFor(o)}</div>
                           </div>
+                          <span className={`shrink-0 text-xs px-3 py-1.5 rounded-full border font-semibold ${statusColors[statusNorm] || "bg-gray-50 border-gray-200 text-gray-700"}`}>
+                            {statusNorm}
+                          </span>
+                        </div>
 
-                          <div className="mt-1 text-sm text-gray-700 truncate">
+                        <div className="flex items-center justify-between gap-3 pt-2">
+                          <span className="text-sm text-gray-600">Total Amount</span>
+                          <span className="text-lg font-bold text-emerald-700">{money(o.total)}</span>
+                        </div>
+
+                        <div className="text-xs text-gray-500 mt-2">
+                          {o.created_at ? new Date(o.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : ""}
+                        </div>
+                      </div>
+
+                      {/* Content */}
+                      <div className="p-5 flex flex-col flex-1 space-y-4">
+                        {/* Customer Info */}
+                        <div className="space-y-2">
+                          <div className="text-sm font-semibold text-gray-900">{resolvedOrderName(o)}</div>
+                          <div className="flex items-center gap-1 text-sm text-gray-600">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 00.948-.684l1.498-4.493a1 1 0 011.502-.684l1.498 4.493a1 1 0 00.948.684H19a2 2 0 012 2v2H3V5z" />
+                            </svg>
                             {resolvedOrderPhone(o)}
                           </div>
+                        </div>
 
-                          <div className="mt-2 text-sm text-gray-600 wrap-break-word line-clamp-2">
-                            <span className="font-medium text-gray-700">Address:</span>{" "}
+                        {/* Address */}
+                        <div className="text-sm">
+                        <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1">Delivery Address</div>
+                          <div className="text-gray-700 line-clamp-2">
                             {resolvedOrderAddress(o)}
                           </div>
                         </div>
+
+                        {/* Status Control */}
+                        <div className="pt-2 border-t border-gray-100 mt-auto">
+                          <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2 block">
+                            Update Status
+                          </label>
+                          <select
+                            value={statusNorm}
+                            onChange={(e) => updateOrderStatus(o, e.target.value, o.payment_method)}
+                            className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                          >
+                            {ORDER_STATUSES.map((s) => (
+                              <option key={s} value={s}>
+                                {s}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
                       </div>
 
-                      <div className="mt-4 pt-3 border-t">
-                        <div className="text-sm text-gray-700 font-medium mb-2">Status</div>
-                        <select
-                          value={normalizeOrderStatus(o.status)}
-                          onChange={(e) => updateOrderStatus(o, e.target.value, o.payment_method)}
-                          className="w-full px-3 py-2 rounded-lg border bg-white"
-                        >
-                          {ORDER_STATUSES.map((s) => (
-                            <option key={s} value={s}>
-                              {s}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div className="mt-auto pt-4">
+                      {/* Actions */}
+                      <div className="p-5 border-t border-gray-100 bg-gray-50/50">
                         <button
                           type="button"
                           onClick={() => setViewOrder(o)}
-                          className="w-full px-4 py-2 rounded-lg border bg-white hover:bg-gray-50 font-medium"
+                          className="w-full px-4 py-2.5 rounded-lg bg-emerald-700 text-white font-medium hover:bg-emerald-800 transition"
                         >
-                          View
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* PAYMENTS */}
-        {tab === "payments" && (
-          <div className="mt-0 bg-white border rounded-2xl shadow-sm p-5">
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="text-lg font-bold">Payments & Delivery Confirmation</h2>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowDeliveryHistory(true)}
-                  className="px-3 py-1 text-sm font-semibold rounded-full border border-teal-200 text-teal-700 hover:bg-teal-50"
-                >
-                  History ({deliveryHistory.length})
-                </button>
-                <span className="px-3 py-1 text-sm font-semibold rounded-full bg-emerald-100 text-emerald-700">
-                  {paymentOrders.length} Out for Delivery
-                </span>
-              </div>
-            </div>
-
-            {oLoading ? (
-              <div className="py-10 text-center text-gray-600">Loading delivery payments…</div>
-            ) : paymentOrders.length === 0 ? (
-              <div className="py-10 text-center text-gray-600">No out-for-delivery orders to process.</div>
-            ) : (
-              <div className="mt-4 max-h-150 overflow-y-auto pr-2 space-y-4">
-                {paymentOrders.map((o) => {
-                  const draft = getDeliveryDraft(o.id);
-                  const isBusy = completingOrderId === o.id;
-                  return (
-                    <div key={o.id} className="border rounded-2xl p-4 bg-gray-50">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <div className="text-sm text-gray-500">Order #{o.id}</div>
-                          <div className="font-semibold text-gray-900 mt-1">{getProductNamesFor(o)}</div>
-                          <div className="text-sm text-gray-700 mt-1">{resolvedOrderName(o)} • {resolvedOrderPhone(o)}</div>
-                          <div className="text-sm text-gray-600 mt-1 wrap-break-word">{resolvedOrderAddress(o)}</div>
-                        </div>
-                        <div className="text-right">
-                          <div className="text-xs text-gray-500">Payment Method</div>
-                          <div className="font-semibold">{o.payment_method || "—"}</div>
-                          <div className="text-xs text-gray-500 mt-2">Total</div>
-                          <div className="font-semibold">{money(o.total)}</div>
-                        </div>
-                      </div>
-
-                      <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <div>
-                          <label className="text-sm font-medium text-gray-700">Driver</label>
-                          <input
-                            value={draft.driver}
-                            onChange={(e) => setDeliveryDraft(o.id, { driver: e.target.value })}
-                            placeholder="Enter driver name"
-                            className="mt-1 w-full px-3 py-2 rounded-lg border bg-white"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-sm font-medium text-gray-700">Delivery Report</label>
-                          <textarea
-                            value={draft.report}
-                            onChange={(e) => setDeliveryDraft(o.id, { report: e.target.value })}
-                            placeholder="Report from rider/driver"
-                            className="mt-1 w-full px-3 py-2 rounded-lg border bg-white min-h-22.5"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-                        <label className="inline-flex items-center gap-2 text-sm text-gray-700">
-                          <input
-                            type="checkbox"
-                            checked={draft.safelyDelivered}
-                            onChange={(e) => setDeliveryDraft(o.id, { safelyDelivered: e.target.checked })}
-                          />
-                          Product safely delivered
-                        </label>
-
-                        <button
-                          type="button"
-                          onClick={() => completePaymentOrder(o)}
-                          disabled={isBusy || !draft.safelyDelivered}
-                          className="px-4 py-2 rounded-lg bg-black text-white hover:opacity-90 disabled:opacity-50"
-                        >
-                          {isBusy ? "Completing…" : "Mark as Completed"}
+                          View Details
                         </button>
                       </div>
                     </div>
@@ -2183,64 +2275,216 @@ export default function Admin() {
           </div>
         )}
 
-        {/* REPORT HISTORY */}
+        {/* PAYMENTS */}
+        {tab === "payments" && (
+          <div className="mt-0 bg-white border border-emerald-100 rounded-2xl shadow-sm p-6 sm:p-8">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+              <div>
+                <h2 className="text-2xl font-bold text-gray-900">Delivery Confirmations</h2>
+                <p className="text-sm text-gray-600 mt-1">Process and confirm delivery payments</p>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowDeliveryHistory(true)}
+                  className="px-4 py-2.5 text-sm font-medium rounded-lg border border-teal-300 bg-teal-50 text-teal-700 hover:bg-teal-100 transition flex items-center gap-2"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  History ({deliveryHistory.length})
+                </button>
+                <span className="px-4 py-2.5 text-sm font-semibold rounded-lg bg-emerald-100 text-emerald-700 border border-emerald-200">
+                  {paymentOrders.length} Pending
+                </span>
+              </div>
+            </div>
+
+            {oLoading ? (
+              <div className="py-16 text-center">
+                <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600"></div>
+                <p className="mt-3 text-gray-600">Loading deliveries…</p>
+              </div>
+            ) : paymentOrders.length === 0 ? (
+              <div className="py-16 text-center">
+                <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <p className="mt-3 text-gray-600">No pending deliveries</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-4">
+                {paymentOrders.map((o) => {
+                  const draft = getDeliveryDraft(o.id);
+                  const isBusy = completingOrderId === o.id;
+                  return (
+                    <div key={o.id} className="bg-white border border-gray-200 hover:border-emerald-200 hover:shadow-md rounded-xl overflow-hidden transition-all duration-200">
+                      {/* Header */}
+                      <div className="p-5 border-b border-gray-100 bg-linear-to-r from-gray-50 to-white">
+                        <div className="flex items-start justify-between gap-4 mb-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Order #{o.id}</div>
+                            <div className="text-sm font-semibold text-gray-900 truncate mt-0.5">{getProductNamesFor(o)}</div>
+                            <div className="text-sm text-gray-600 mt-2">{resolvedOrderName(o)} • {resolvedOrderPhone(o)}</div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <span className="inline-block px-3 py-1.5 text-xs font-semibold rounded-full bg-sky-50 border border-sky-200 text-sky-700">
+                              Out for Delivery
+                            </span>
+                          </div>
+                        </div>
+                        <div className="text-sm text-gray-600 wrap-break-word">{resolvedOrderAddress(o)}</div>
+                        <div className="mt-3 flex items-center justify-between gap-3 pt-3 border-t border-gray-100">
+                          <div>
+                            <span className="text-xs text-gray-600">Payment Method</span>
+                            <div className="font-semibold text-gray-900">{o.payment_method || "—"}</div>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-xs text-gray-600">Total Amount</span>
+                            <div className="text-lg font-bold text-emerald-700">{money(o.total)}</div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Form */}
+                      <div className="p-5 space-y-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm font-semibold text-gray-900 mb-2">Driver Name</label>
+                            <input
+                              value={draft.driver}
+                              onChange={(e) => setDeliveryDraft(o.id, { driver: e.target.value })}
+                              placeholder="Enter driver name"
+                              className="w-full px-4 py-2.5 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-semibold text-gray-900 mb-2">Delivery Report</label>
+                            <textarea
+                              value={draft.report}
+                              onChange={(e) => setDeliveryDraft(o.id, { report: e.target.value })}
+                              placeholder="Report from driver..."
+                              className="w-full px-4 py-2.5 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent min-h-24 resize-none"
+                            />
+                          </div>
+                        </div>
+
+                        <label className="inline-flex items-center gap-3 px-4 py-3 rounded-lg bg-emerald-50 border border-emerald-200 cursor-pointer hover:bg-emerald-100 transition w-full">
+                          <input
+                            type="checkbox"
+                            checked={draft.safelyDelivered}
+                            onChange={(e) => setDeliveryDraft(o.id, { safelyDelivered: e.target.checked })}
+                            className="w-4 h-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                          />
+                          <span className="text-sm font-medium text-gray-900">Product safely delivered</span>
+                        </label>
+                      </div>
+
+                      {/* Actions */}
+                      <div className="p-5 border-t border-gray-100 bg-gray-50/50">
+                        <button
+                          type="button"
+                          onClick={() => completePaymentOrder(o)}
+                          disabled={isBusy || !draft.safelyDelivered}
+                          className="w-full px-4 py-2.5 rounded-lg bg-emerald-700 text-white font-medium hover:bg-emerald-800 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                        >
+                          {isBusy ? "Processing…" : "Mark as Completed"}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* DELIVERY HISTORY MODAL */}
         {tab === "payments" && showDeliveryHistory && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div
-              className="absolute inset-0"
+              className="absolute inset-0 bg-black/50"
               onClick={() => setShowDeliveryHistory(false)}
               aria-hidden="true"
             />
-            <div className="relative w-full max-w-4xl bg-white border rounded-2xl shadow-xl p-5">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <h2 className="text-lg font-bold">Delivery Report History</h2>
-                  <span className="px-3 py-1 text-sm font-semibold rounded-full bg-teal-100 text-teal-700">
-                    {deliveryHistory.length} Completed
-                  </span>
+            <div className="relative w-full max-w-4xl bg-white border border-emerald-100 rounded-2xl shadow-2xl p-6 sm:p-8 max-h-[90vh] overflow-y-auto">
+              <div className="flex items-start justify-between gap-4 mb-6">
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900">Delivery Report History</h2>
+                  <p className="text-sm text-gray-600 mt-1">Completed delivery confirmations</p>
                 </div>
                 <button
                   type="button"
                   onClick={() => setShowDeliveryHistory(false)}
-                  className="px-3 py-1 text-sm font-semibold rounded-full border border-gray-200 text-gray-700 hover:bg-gray-50"
+                  className="p-2 hover:bg-gray-100 rounded-lg transition shrink-0"
+                  title="Close"
                 >
-                  Close
+                  <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
                 </button>
               </div>
 
+              <div className="mb-4 flex items-center gap-2">
+                <span className="px-3 py-1.5 text-sm font-semibold rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">
+                  {deliveryHistory.length} Completed
+                </span>
+              </div>
+
               {deliveryHistory.length === 0 ? (
-                <div className="py-10 text-center text-gray-600">No delivery reports yet.</div>
+                <div className="py-16 text-center">
+                  <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <p className="mt-3 text-gray-600">No delivery reports yet</p>
+                </div>
               ) : (
-                <div className="mt-4 max-h-[70vh] overflow-y-auto pr-2 space-y-4">
+                <div className="grid grid-cols-1 gap-4">
                   {deliveryHistory.map((historyItem, idx) => (
-                    <div key={`${historyItem.orderId}-${idx}`} className="border rounded-2xl p-4 bg-teal-50/50">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <div className="text-sm text-gray-500">Order #{historyItem.orderId}</div>
-                          <div className="font-semibold text-gray-900 mt-1">{historyItem.productNames}</div>
-                          <div className="text-sm text-gray-700 mt-1">{historyItem.customerName} • {historyItem.customerPhone}</div>
-                          <div className="text-sm text-gray-600 mt-1 wrap-break-word">{historyItem.customerAddress}</div>
+                    <div key={`${historyItem.orderId}-${idx}`} className="bg-white border border-gray-200 rounded-xl overflow-hidden hover:shadow-md transition">
+                      {/* Header */}
+                      <div className="p-5 border-b border-gray-100 bg-linear-to-r from-gray-50 to-white">
+                        <div className="flex items-start justify-between gap-4 mb-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Order #{historyItem.orderId}</div>
+                            <div className="text-sm font-semibold text-gray-900 truncate mt-0.5">{historyItem.productNames}</div>
+                            <div className="text-sm text-gray-600 mt-2">{historyItem.customerName} • {historyItem.customerPhone}</div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <span className="inline-block px-3 py-1.5 text-xs font-semibold rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700">
+                              Completed
+                            </span>
+                          </div>
                         </div>
-                        <div className="text-right">
-                          <div className="text-xs text-gray-500">Completed At</div>
-                          <div className="font-semibold text-sm">{new Date(historyItem.completedAt).toLocaleString()}</div>
-                          <div className="text-xs text-gray-500 mt-2">Driver</div>
-                          <div className="font-semibold text-sm">{historyItem.driver}</div>
-                          <div className="text-xs text-gray-500 mt-2">Total</div>
-                          <div className="font-semibold">{money(historyItem.total)}</div>
+                        <div className="text-sm text-gray-600 wrap-break-word">{historyItem.customerAddress}</div>
+                        <div className="mt-3 flex items-center justify-between gap-3 pt-3 border-t border-gray-100">
+                          <div>
+                            <span className="text-xs text-gray-600">Driver</span>
+                            <div className="font-semibold text-gray-900">{historyItem.driver || "—"}</div>
+                          </div>
+                          <div className="text-center">
+                            <span className="text-xs text-gray-600">Total Amount</span>
+                            <div className="text-lg font-bold text-emerald-700">{money(historyItem.total)}</div>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-xs text-gray-600">Completed</span>
+                            <div className="font-semibold text-sm text-gray-900">{new Date(historyItem.completedAt).toLocaleDateString()}</div>
+                          </div>
                         </div>
                       </div>
 
-                      <div className="mt-4 p-3 rounded-lg bg-white border border-teal-200">
-                        <div className="text-xs font-semibold text-gray-600 mb-2">Delivery Report</div>
-                        <div className="text-sm text-gray-700 whitespace-pre-wrap">{historyItem.report}</div>
-                      </div>
-
-                      <div className="mt-3 flex items-center gap-2 text-sm">
-                        <svg className="h-4 w-4 text-emerald-600" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                        </svg>
-                        <span className="text-gray-600">Product safely delivered</span>
+                      {/* Report */}
+                      <div className="p-5 space-y-4">
+                        <div className="p-4 rounded-lg bg-emerald-50 border border-emerald-200">
+                          <div className="text-xs font-semibold text-emerald-900 uppercase tracking-wide mb-2">Delivery Report</div>
+                          <div className="text-sm text-gray-700 whitespace-pre-wrap">{historyItem.report || "No report provided"}</div>
+                        </div>
+                        <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-emerald-50 border border-emerald-200">
+                          <svg className="h-5 w-5 text-emerald-600" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                          </svg>
+                          <span className="text-sm font-medium text-emerald-900">Product safely delivered</span>
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -2252,312 +2496,362 @@ export default function Admin() {
 
         {/* USERS */}
         {tab === "users" && (
-          <div className="mt-0 bg-white border rounded-2xl shadow-sm p-5">
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="text-lg font-bold">Users</h2>
-              <input
-                value={uSearch}
-                onChange={(e) => setUSearch(e.target.value)}
-                placeholder="Search users..."
-                className="px-3 py-2 rounded-lg border w-64 max-w-full"
-              />
+          <div className="mt-0 bg-white border border-emerald-100 rounded-2xl shadow-sm p-6 sm:p-8">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+              <div>
+                <h2 className="text-2xl font-bold text-gray-900">Users</h2>
+                <p className="text-sm text-gray-600 mt-1">Manage and monitor all system users</p>
+              </div>
+              <div className="relative flex-1 sm:flex-none">
+                <input
+                  value={uSearch}
+                  onChange={(e) => setUSearch(e.target.value)}
+                  placeholder="Search by name, email..."
+                  className="w-full sm:w-72 px-4 py-2.5 pl-10 rounded-lg border border-gray-300 text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent hover:border-gray-400 transition"
+                />
+                <svg className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </div>
             </div>
 
             {uLoading ? (
-              <div className="py-10 text-center text-gray-600">Loading users…</div>
+              <div className="py-16 text-center">
+                <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600"></div>
+                <p className="mt-3 text-gray-600">Loading users…</p>
+              </div>
             ) : filteredUsers.length === 0 ? (
-              <div className="py-10 text-center text-gray-600">No users found.</div>
+              <div className="py-16 text-center">
+                <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.856-1.487M15 10a3 3 0 11-6 0 3 3 0 016 0zM6 20a9 9 0 0118 0v2h2v-2a11 11 0 00-22 0v2h2z" />
+                </svg>
+                <p className="mt-3 text-gray-600">No users found</p>
+              </div>
             ) : (
-              <div className="mt-4 overflow-x-auto">
-                <table className="min-w-full text-sm">
-                  <thead>
-                    <tr className="text-left text-gray-600">
-                      <th className="py-2 pr-4">Name</th>
-                      <th className="py-2 pr-4">Email</th>
-                      <th className="py-2 pr-4">Role</th>
-                      <th className="py-2 pr-4">Status</th>
-                      <th className="py-2 pr-4 w-16">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredUsers.map((u) => (
-                      <tr key={u.id} className="border-t">
-                        <td className="py-2 pr-4 font-medium">{u.name || "—"}</td>
-                        <td className="py-2 pr-4">{u.email || "—"}</td>
-                        <td className="py-2 pr-4">{u.role || "—"}</td>
-                        <td className="py-2 pr-4">
-                          {u.banned ? (
-                            <span className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-700">Banned</span>
-                          ) : (
-                            <span className="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-700">Active</span>
-                          )}
-                        </td>
-                        <td className="py-2 pr-4 relative">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                {filteredUsers.map((u) => {
+                  const isAdmin = safeLower(u.role) === "admin";
+                  const isBanned = u.banned;
+                  const statusColor = isBanned ? "bg-red-50 border-red-200 text-red-700" : isAdmin ? "bg-purple-50 border-purple-200 text-purple-700" : "bg-emerald-50 border-emerald-200 text-emerald-700";
+                  const statusLabel = isBanned ? "Banned" : isAdmin ? "Admin" : "Active";
+
+                  return (
+                    <div
+                      key={u.id}
+                      className="bg-white border border-gray-200 hover:border-emerald-200 hover:shadow-md rounded-xl overflow-hidden transition-all duration-200 flex flex-col"
+                    >
+                      {/* Header */}
+                      <div className="p-5 border-b border-gray-100 bg-linear-to-r from-gray-50 to-white">
+                        <div className="flex items-start justify-between gap-3 mb-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide">User</div>
+                            <div className="text-sm font-semibold text-gray-900 truncate mt-0.5">{u.name || "Unnamed User"}</div>
+                          </div>
+                          <span className={`shrink-0 text-xs px-3 py-1.5 rounded-full border font-semibold ${statusColor}`}>
+                            {statusLabel}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 text-sm text-gray-600">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                          </svg>
+                          {u.email || "No email"}
+                        </div>
+                      </div>
+
+                      {/* Content */}
+                      <div className="p-5 flex-1 space-y-3">
+                        {/* Role */}
+                        <div>
+                          <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1">Role</div>
+                          <div className="text-sm font-medium text-gray-900">{u.role || "User"}</div>
+                        </div>
+
+                        {/* Account Status */}
+                        <div>
+                          <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Account Status</div>
+                          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-50 border border-gray-200">
+                            <div className={`w-2 h-2 rounded-full ${isBanned ? "bg-red-600" : "bg-emerald-600"}`}></div>
+                            <span className={`text-sm font-medium ${isBanned ? "text-red-700" : "text-emerald-700"}`}>
+                              {isBanned ? "Account Banned" : "Profile Active"}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Actions */}
+                      <div className="p-5 border-t border-gray-100 bg-gray-50/50">
+                        <div className="relative">
                           <button
                             type="button"
                             onClick={() => setUserMenuOpen(userMenuOpen === u.id ? null : u.id)}
-                            className="p-2 hover:bg-gray-100 rounded-lg transition"
-                            title="Actions"
+                            className="w-full flex items-center justify-between gap-2 px-4 py-2.5 rounded-lg border border-gray-300 bg-white text-gray-700 font-medium text-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition"
+                            title="User actions"
                           >
-                            <svg className="w-5 h-5 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
+                            <span>Actions</span>
+                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                               <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
                             </svg>
                           </button>
                           {userMenuOpen === u.id && (
-                            <div className="absolute right-full mr-2 top-0 w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-50 max-h-64 overflow-y-auto">
+                            <div className="absolute bottom-full mb-2 w-full bg-white border border-gray-200 rounded-lg shadow-lg z-50 overflow-hidden">
                               <button
                                 type="button"
-                                onClick={() => toggleAdmin(u.id, true)}
-                                disabled={safeLower(u.role) === "admin" || u.banned}
-                                className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed rounded-t-lg"
+                                onClick={() => {
+                                  toggleAdmin(u.id, true);
+                                  setUserMenuOpen(null);
+                                }}
+                                disabled={isAdmin || isBanned}
+                                className="w-full text-left px-4 py-2.5 text-sm hover:bg-purple-50 disabled:opacity-50 disabled:cursor-not-allowed transition"
                               >
                                 Make Admin
                               </button>
                               <button
                                 type="button"
-                                onClick={() => toggleAdmin(u.id, false)}
-                                disabled={safeLower(u.role) !== "admin" || u.banned}
-                                className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed border-t"
+                                onClick={() => {
+                                  toggleAdmin(u.id, false);
+                                  setUserMenuOpen(null);
+                                }}
+                                disabled={!isAdmin || isBanned}
+                                className="w-full text-left px-4 py-2.5 text-sm border-t border-gray-100 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition"
                               >
                                 Remove Admin
                               </button>
-                              {u.banned ? (
+                              {isBanned ? (
                                 <button
                                   type="button"
-                                  onClick={() => unbanUser(u.id)}
-                                  className="w-full text-left px-4 py-2 text-sm text-green-600 hover:bg-green-50 border-t rounded-b-lg"
+                                  onClick={() => {
+                                    unbanUser(u.id);
+                                    setUserMenuOpen(null);
+                                  }}
+                                  className="w-full text-left px-4 py-2.5 text-sm text-emerald-600 hover:bg-emerald-50 border-t border-gray-100 transition"
                                 >
                                   Unban User
                                 </button>
                               ) : (
                                 <button
                                   type="button"
-                                  onClick={() => banUser(u.id)}
-                                  className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 border-t rounded-b-lg"
+                                  onClick={() => {
+                                    banUser(u.id);
+                                    setUserMenuOpen(null);
+                                  }}
+                                  className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 border-t border-gray-100 transition"
                                 >
                                   Ban User
                                 </button>
                               )}
                             </div>
                           )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-
-                {msg.text && (
-                  <p className={`mt-3 text-sm font-semibold ${
-                    msg.type === "success" ? "text-green-600" : "text-red-600"
-                  }`}>
-                    {msg.text}
-                  </p>
-                )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
+            )}
+
+            {msg.text && (
+              <p className={`mt-4 text-sm font-semibold ${
+                msg.type === "success" ? "text-green-600" : "text-red-600"
+              }`}>
+                {msg.text}
+              </p>
             )}
           </div>
         )}
 
         {/* SALES */}
         {tab === "sales" && (
-          <div className="mt-0 bg-white border rounded-2xl shadow-sm p-5 space-y-6">
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="text-lg font-bold">Sales</h2>
-              <div className="text-sm text-gray-600">Based on Completed orders</div>
-            </div>
-
-            <div className="flex flex-wrap items-end gap-3">
+          <div className="mt-0 bg-white border border-emerald-100 rounded-2xl shadow-sm p-6 sm:p-8 space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
               <div>
-                <label className="text-xs text-gray-600">Date Range</label>
-                <div className="mt-1 flex items-center gap-2">
+                <h2 className="text-2xl font-bold text-gray-900">Sales Analytics</h2>
+                <p className="text-sm text-gray-600 mt-1">Analyze completed orders and revenue trends</p>
+              </div>
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wide mb-2">Date Range</label>
                   <div className="relative">
                     <select
                       value={salesDateRange}
                       onChange={(e) => setSalesDateRange(e.target.value)}
-                      className="block w-48 sm:w-56 pl-3 pr-10 py-2 rounded-lg border bg-white text-sm appearance-none"
+                      className="appearance-none w-full sm:w-56 px-4 py-2.5 pr-10 rounded-lg border border-gray-300 bg-white text-gray-700 font-medium text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent cursor-pointer hover:border-gray-400 transition"
                     >
-                      <option value="All">All</option>
+                      <option value="All">All Time</option>
                       <option value="Today">Today</option>
                       <option value="Last 7 Days">Last 7 Days</option>
                       <option value="This Month">This Month</option>
-                      <option value="Custom">Custom</option>
+                      <option value="Custom">Custom Range</option>
                     </select>
-                    <svg
-                      aria-hidden="true"
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                      className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500"
-                    >
-                      <path d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.17l3.71-3.94a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06z" />
+                    <svg className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-600 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
                     </svg>
                   </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSalesFilterMenuOpen(!salesFilterMenuOpen)}
+                  className="px-4 py-2.5 rounded-lg border border-gray-300 bg-white text-gray-700 font-medium text-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition flex items-center justify-center gap-2"
+                  title="Custom date range options"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  Custom Date Range
+                </button>
+              </div>
+            </div>
 
-                  <div className="relative">
+            {salesFilterMenuOpen && (
+              <div className="w-full sm:w-80 bg-white border border-gray-200 rounded-lg shadow-lg p-4">
+                <div className="text-sm font-semibold text-gray-900 mb-4">Custom Date Range</div>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">From</label>
+                    <input
+                      type="date"
+                      value={salesDateFrom}
+                      onChange={(e) => {
+                        setSalesDateRange("Custom");
+                        setSalesDateFrom(e.target.value);
+                      }}
+                      className="w-full px-4 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">To</label>
+                    <input
+                      type="date"
+                      value={salesDateTo}
+                      onChange={(e) => {
+                        setSalesDateRange("Custom");
+                        setSalesDateTo(e.target.value);
+                      }}
+                      className="w-full px-4 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                    />
+                  </div>
+                  <div className="flex gap-2 pt-2 border-t border-gray-200 mt-4">
                     <button
                       type="button"
-                      onClick={() => setSalesFilterMenuOpen(!salesFilterMenuOpen)}
-                      className="p-2 hover:bg-gray-100 rounded-lg transition border bg-white"
-                      title="Date range options"
+                      onClick={() => {
+                        setSalesDateRange("All");
+                        setSalesDateFrom("");
+                        setSalesDateTo("");
+                        setSalesFilterMenuOpen(false);
+                      }}
+                      className="flex-1 px-3 py-2 text-sm rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 transition font-medium"
                     >
-                      <svg className="w-5 h-5 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
-                        <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
-                      </svg>
+                      Clear
                     </button>
-
-                    {salesFilterMenuOpen && (
-                      <div className="user-menu-dropdown absolute right-0 mt-1 w-72 bg-white border border-gray-200 rounded-lg shadow-lg z-50 p-3">
-                        <div className="text-xs text-gray-600 font-medium mb-2">Literal Date Range</div>
-                        <div className="space-y-2">
-                          <div>
-                            <label className="text-xs text-gray-500">From</label>
-                            <input
-                              type="date"
-                              value={salesDateFrom}
-                              onChange={(e) => {
-                                setSalesDateRange("Custom");
-                                setSalesDateFrom(e.target.value);
-                              }}
-                              className="mt-1 w-full px-3 py-2 rounded-lg border bg-white text-sm"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-xs text-gray-500">To</label>
-                            <input
-                              type="date"
-                              value={salesDateTo}
-                              onChange={(e) => {
-                                setSalesDateRange("Custom");
-                                setSalesDateTo(e.target.value);
-                              }}
-                              className="mt-1 w-full px-3 py-2 rounded-lg border bg-white text-sm"
-                            />
-                          </div>
-                        </div>
-                        <div className="mt-3 flex justify-end gap-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSalesDateRange("All");
-                              setSalesDateFrom("");
-                              setSalesDateTo("");
-                              setSalesFilterMenuOpen(false);
-                            }}
-                            className="px-3 py-1.5 text-sm rounded-lg border bg-white hover:bg-gray-50"
-                          >
-                            Clear
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setSalesFilterMenuOpen(false)}
-                            className="px-3 py-1.5 text-sm rounded-lg border bg-white hover:bg-gray-50"
-                          >
-                            Done
-                          </button>
-                        </div>
-                      </div>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => setSalesFilterMenuOpen(false)}
+                      className="flex-1 px-3 py-2 text-sm rounded-lg bg-emerald-700 text-white hover:bg-emerald-800 transition font-medium"
+                    >
+                      Apply
+                    </button>
                   </div>
                 </div>
               </div>
-            </div>
+            )}
 
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-              <div className="border rounded-xl p-3 bg-gray-50">
-                <div className="text-xs text-gray-500">Total Income</div>
-                <div className="text-xl font-semibold mt-1">{money(salesIncome)}</div>
+            {/* KPI Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="bg-linear-to-br from-emerald-50 to-white border border-emerald-200 rounded-xl p-6">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-xs font-semibold text-emerald-700 uppercase tracking-wide">Total Income</div>
+                  <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <div className="text-3xl font-bold text-emerald-700">{money(salesIncome)}</div>
+                <div className="text-xs text-gray-600 mt-2">From completed orders</div>
               </div>
-              <div className="border rounded-xl p-3 bg-gray-50">
-                <div className="text-xs text-gray-500">Completed Orders</div>
-                <div className="text-xl font-semibold mt-1">{filteredSalesOrders.length}</div>
+
+              <div className="bg-linear-to-br from-sky-50 to-white border border-sky-200 rounded-xl p-6">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-xs font-semibold text-sky-700 uppercase tracking-wide">Completed Orders</div>
+                  <svg className="w-5 h-5 text-sky-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                  </svg>
+                </div>
+                <div className="text-3xl font-bold text-sky-700">{filteredSalesOrders.length}</div>
+                <div className="text-xs text-gray-600 mt-2">In selected period</div>
               </div>
-              <div className="border rounded-xl p-3 bg-gray-50">
-                <div className="text-xs text-gray-500">Products Sold</div>
-                <div className="text-xl font-semibold mt-1">
+
+              <div className="bg-linear-to-br from-violet-50 to-white border border-violet-200 rounded-xl p-6">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-xs font-semibold text-violet-700 uppercase tracking-wide">Products Sold</div>
+                  <svg className="w-5 h-5 text-violet-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
+                  </svg>
+                </div>
+                <div className="text-3xl font-bold text-violet-700">
                   {soldProducts.reduce((sum, item) => sum + Number(item.qty || 0), 0)}
                 </div>
+                <div className="text-xs text-gray-600 mt-2">Total units sold</div>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div className="border rounded-xl p-4">
-                <h3 className="text-sm font-semibold mb-3">Income by Day</h3>
-                {salesByDay.length === 0 ? (
-                  <p className="text-sm text-gray-600">No sales data yet.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {salesByDay.map((entry) => {
-                      const max = Math.max(...salesByDay.map((x) => x.amount), 1);
-                      const widthPct = (entry.amount / max) * 100;
-                      return (
-                        <div key={entry.day}>
-                          <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
-                            <span>{entry.day}</span>
-                            <span>{money(entry.amount)}</span>
-                          </div>
-                          <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                            <div className="h-full bg-emerald-600" style={{ width: `${widthPct}%` }} />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              <div className="border rounded-xl p-4">
-                <h3 className="text-sm font-semibold mb-3">Income by Category</h3>
-                {salesByCategory.length === 0 ? (
-                  <p className="text-sm text-gray-600">No category sales data yet.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {salesByCategory.map((entry) => {
-                      const max = Math.max(...salesByCategory.map((x) => x.amount), 1);
-                      const widthPct = (entry.amount / max) * 100;
-                      return (
-                        <div key={entry.category}>
-                          <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
-                            <span>{entry.category}</span>
-                            <span>{money(entry.amount)}</span>
-                          </div>
-                          <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                            <div className="h-full bg-blue-600" style={{ width: `${widthPct}%` }} />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="border rounded-xl p-4">
-              <h3 className="text-sm font-semibold mb-3">Buyers by Barangay</h3>
-              {salesByBarangay.length === 0 ? (
-                <p className="text-sm text-gray-600">No barangay data yet.</p>
-              ) : (
-                <div className="space-y-2">
-                  {salesByBarangay.map((entry) => {
-                    const max = Math.max(...salesByBarangay.map((x) => x.count), 1);
-                    const widthPct = (entry.count / max) * 100;
-                    return (
-                      <div key={entry.barangay}>
-                        <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
-                          <span>{entry.barangay}</span>
-                          <span>{entry.count} buyer{entry.count > 1 ? "s" : ""}</span>
-                        </div>
-                        <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                          <div className="h-full bg-violet-600" style={{ width: `${widthPct}%` }} />
-                        </div>
-                      </div>
-                    );
-                  })}
+            {/* Charts */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                <div className="p-5 border-b border-gray-100 bg-linear-to-r from-gray-50 to-white">
+                  <h3 className="text-sm font-semibold text-gray-900">Daily Income</h3>
+                  <p className="text-xs text-gray-600 mt-1">Revenue by day</p>
                 </div>
-              )}
+                <div className="p-5">
+                  {salesByDay.length === 0 ? (
+                    <p className="text-sm text-gray-600 py-8 text-center">No sales data available</p>
+                  ) : (
+                    <div className="h-96">
+                      <Bar data={salesByDayChartData} options={salesCurrencyBarOptions} />
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                <div className="p-5 border-b border-gray-100 bg-linear-to-r from-gray-50 to-white">
+                  <h3 className="text-sm font-semibold text-gray-900">Income by Category</h3>
+                  <p className="text-xs text-gray-600 mt-1">Revenue breakdown</p>
+                </div>
+                <div className="p-5">
+                  {salesByCategory.length === 0 ? (
+                    <p className="text-sm text-gray-600 py-8 text-center">No category data available</p>
+                  ) : (
+                    <div className="h-96">
+                      <Bar data={salesByCategoryChartData} options={salesCurrencyBarOptions} />
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
 
-            <div className="border rounded-xl p-4">
-              <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-                <h3 className="text-sm font-semibold">Products Sold</h3>
+            {/* Barangay Chart */}
+            <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+              <div className="p-5 border-b border-gray-100 bg-linear-to-r from-gray-50 to-white">
+                <h3 className="text-sm font-semibold text-gray-900">Buyers by Barangay</h3>
+                <p className="text-xs text-gray-600 mt-1">Customer distribution by location</p>
+              </div>
+              <div className="p-5">
+                {salesByBarangay.length === 0 ? (
+                  <p className="text-sm text-gray-600 py-8 text-center">No barangay data available</p>
+                ) : (
+                  <div className="h-96">
+                    <Bar data={salesByBarangayChartData} options={salesCountBarOptions} />
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Products Sold Table */}
+            <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+              <div className="p-5 border-b border-gray-100 bg-linear-to-r from-gray-50 to-white flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900">Top Products Sold</h3>
+                  <p className="text-xs text-gray-600 mt-1">Best performing products</p>
+                </div>
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
@@ -2565,15 +2859,15 @@ export default function Admin() {
                     className={`px-3 py-2 rounded-lg border text-sm font-medium transition ${
                       showBestBuysOnly
                         ? "bg-emerald-700 text-white border-emerald-700"
-                        : "bg-white text-gray-700 hover:bg-gray-50"
+                        : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
                     }`}
                   >
-                    {showBestBuysOnly ? "Showing Top 10" : "Best Buys"}
+                    {showBestBuysOnly ? "Top 10" : "All"}
                   </button>
                   <select
                     value={salesProductCategory}
                     onChange={(e) => setSalesProductCategory(e.target.value)}
-                    className="px-3 py-2 rounded-lg border bg-white text-sm"
+                    className="px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
                   >
                     {soldProductCategories.map((category) => (
                       <option key={category} value={category}>
@@ -2583,32 +2877,36 @@ export default function Admin() {
                   </select>
                 </div>
               </div>
-              {filteredSoldProducts.length === 0 ? (
-                <p className="text-sm text-gray-600">No products sold yet.</p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-sm">
-                    <thead>
-                      <tr className="text-left text-gray-600 border-b">
-                        <th className="py-2 pr-4">Product</th>
-                        <th className="py-2 pr-4">Category</th>
-                        <th className="py-2 pr-4">Qty Sold</th>
-                        <th className="py-2 pr-4">Income</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredSoldProducts.map((item, idx) => (
-                        <tr key={`${item.name}-${idx}`} className="border-b last:border-b-0">
-                          <td className="py-2 pr-4 font-medium">{item.name}</td>
-                          <td className="py-2 pr-4">{item.category}</td>
-                          <td className="py-2 pr-4">{item.qty}</td>
-                          <td className="py-2 pr-4 font-semibold">{money(item.amount)}</td>
+              <div className="p-5">
+                {filteredSoldProducts.length === 0 ? (
+                  <p className="text-sm text-gray-600 py-8 text-center">No products sold yet.</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-sm">
+                      <thead>
+                        <tr className="text-left text-gray-600 border-b border-gray-200">
+                          <th className="py-3 pr-4 font-semibold">Product</th>
+                          <th className="py-3 pr-4 font-semibold">Category</th>
+                          <th className="py-3 pr-4 font-semibold text-right">Qty Sold</th>
+                          <th className="py-3 pr-4 font-semibold text-right">Income</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+                      </thead>
+                      <tbody>
+                        {filteredSoldProducts.map((item, idx) => (
+                          <tr key={`${item.name}-${idx}`} className="border-b border-gray-100 hover:bg-gray-50 transition">
+                            <td className="py-3 pr-4 font-medium text-gray-900">{item.name}</td>
+                            <td className="py-3 pr-4 text-gray-600">{item.category}</td>
+                            <td className="py-3 pr-4 text-right">
+                              <span className="inline-block px-3 py-1 rounded-full bg-blue-50 text-blue-700 font-medium text-xs">{item.qty}</span>
+                            </td>
+                            <td className="py-3 pr-4 text-right font-semibold text-emerald-700">{money(item.amount)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}

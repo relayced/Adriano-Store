@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "../supabaseClient";
+import QuickCheckoutModal from "../components/QuickCheckoutModal";
 
 const DEFAULT_CATEGORIES = ["All", "Notebooks", "Pens", "Pencils", "Paper", "Accessories", "Paintings"];
 const CATEGORY_ALIASES = {
@@ -89,6 +90,8 @@ export default function Products({ session }) {
   const [buyNowQty, setBuyNowQty] = useState(1);
   const [buyNowOpen, setBuyNowOpen] = useState(false);
   const [buyNowOptions, setBuyNowOptions] = useState(null);
+  const [quickCheckoutOpen, setQuickCheckoutOpen] = useState(false);
+  const [quickCheckoutItem, setQuickCheckoutItem] = useState(null);
   const [toast, setToast] = useState({ message: "", visible: false });
 
   // Product details + reviews states
@@ -379,9 +382,20 @@ export default function Products({ session }) {
       });
     }
 
+    const checkoutItem = {
+      product_id: buyNowProduct.id,
+      name: buyNowProduct.name,
+      price: Number(buyNowProduct.price || 0),
+      qty: Number(buyNowQty),
+      image_url: buyNowProduct.image_url || null,
+      options: normalizeOptions(buyNowOptions),
+      options_key: optionsKey,
+    };
+
     setCart(cart);
     setBuyNowOpen(false);
-    navigate("/cart?checkout=1");
+    setQuickCheckoutItem(checkoutItem);
+    setQuickCheckoutOpen(true);
   }
 
   const categories = useMemo(() => {
@@ -712,6 +726,27 @@ export default function Products({ session }) {
           </div>
         </div>
       )}
+
+      <QuickCheckoutModal
+        open={quickCheckoutOpen}
+        item={quickCheckoutItem}
+        onClose={() => {
+          setQuickCheckoutOpen(false);
+          setQuickCheckoutItem(null);
+        }}
+        onOrdered={() => {
+          if (!quickCheckoutItem?.product_id) return;
+          const cart = getCart();
+          const next = cart.filter(
+            (x) =>
+              !(
+                Number(x.product_id) === Number(quickCheckoutItem.product_id) &&
+                (x.options_key || "") === (quickCheckoutItem.options_key || "")
+              )
+          );
+          setCart(next);
+        }}
+      />
 
       {/* Product Details + Ratings/Comments Modal */}
       {detailsOpen && selectedProduct && (

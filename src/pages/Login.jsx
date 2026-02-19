@@ -29,30 +29,44 @@ export default function Login() {
     // Check if user is banned
     if (data?.user?.id) {
       try {
-        const { data: profile } = await supabase
+        const { data: profile, error: profileError } = await supabase
           .from("profiles")
           .select("id, banned")
           .eq("id", data.user.id)
           .maybeSingle();
 
-        // If user is banned, sign them out and show error
-        if (profile?.banned) {
+        console.log("[Login] Profile check:", { profile, profileError, userId: data.user.id });
+
+        // If user is banned, show error and keep them on this page
+        if (profile?.banned === true) {
+          console.log("[Login] User is banned - preventing login");
+          setBusy(false);
+          return setMsg("Your account has been suspended. You cannot log in at this time. Please contact support for assistance.");
+        }
+
+        // If profile query failed, sign them out and show error
+        if (profileError) {
+          console.warn("[Login] Profile query error:", profileError);
           await supabase.auth.signOut();
           setBusy(false);
-          return setMsg("Your account has been banned. Please contact support.");
+          return setMsg("Could not verify your account. Please try again.");
         }
 
         // If no profile, create it
         if (!profile) {
+          console.log("[Login] Creating new profile for user");
           await supabase.from("profiles").insert({
             id: data.user.id,
             email: data.user.email || "",
             role: "user",
+            banned: false,
           });
         }
       } catch (err) {
-        // Ignore profile creation errors - don't block login
-        console.warn("Could not check profile:", err?.message);
+        console.error("[Login] Error during ban check:", err);
+        await supabase.auth.signOut();
+        setBusy(false);
+        return setMsg("An error occurred during login. Please try again.");
       }
     }
 
@@ -87,6 +101,32 @@ export default function Login() {
           </p>
 
           <form className="mt-6 space-y-4" onSubmit={handleLogin}>
+            {msg && (
+              <div className={`rounded-xl border-2 p-4 flex gap-3 ${
+                msg.toLowerCase().includes("suspended") 
+                  ? "border-red-300 bg-red-50"
+                  : "border-red-300 bg-red-50"
+              }`}>
+                <div className="text-2xl">🚫</div>
+                <div className="flex-1">
+                  <p className={`text-sm font-bold ${
+                    msg.toLowerCase().includes("suspended")
+                      ? "text-red-900"
+                      : "text-red-800"
+                  }`}>
+                    {msg.toLowerCase().includes("suspended") ? "Account Suspended" : "Login Error"}
+                  </p>
+                  <p className={`text-sm mt-1 ${
+                    msg.toLowerCase().includes("suspended")
+                      ? "text-red-800"
+                      : "text-red-700"
+                  }`}>
+                    {msg}
+                  </p>
+                </div>
+              </div>
+            )}
+
             <div className="space-y-1">
               <label className="text-sm font-semibold text-emerald-900">Email</label>
               <input
@@ -154,8 +194,6 @@ export default function Login() {
             >
               {busy ? "Signing in…" : "Sign in"}
             </button>
-
-            {msg && <p className="text-sm text-red-600 font-semibold">{msg}</p>}
 
             <p className="text-sm text-emerald-700">
               Don't have an account?{" "}

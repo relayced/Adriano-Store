@@ -52,6 +52,7 @@ export default function App() {
   const [session, setSession] = useState(null);
   const [role, setRole] = useState("user");
   const [fullName, setFullName] = useState("");
+  const [isBanned, setIsBanned] = useState(false);
   const [loadingProfile, setLoadingProfile] = useState(false);
   const [adminNeedsLandscape, setAdminNeedsLandscape] = useState(false);
 
@@ -90,6 +91,7 @@ export default function App() {
         } else {
           setRole("user");
           setFullName("");
+          setIsBanned(false);
           setLoadingProfile(false);
         }
       } catch (e) {
@@ -115,6 +117,7 @@ export default function App() {
       } else {
         setRole("user");
         setFullName("");
+        setIsBanned(false);
         setLoadingProfile(false);
       }
     });
@@ -125,6 +128,18 @@ export default function App() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Safety check: if user becomes banned, sign them out
+  useEffect(() => {
+    async function checkBannedStatus() {
+      if (session && isBanned) {
+        console.log("[App] User is banned - signing out immediately");
+        await supabase.auth.signOut();
+        setSession(null);
+      }
+    }
+    checkBannedStatus();
+  }, [isBanned, session]);
 
   async function safeLoadProfile(userId) {
     const watchdog = setTimeout(() => {
@@ -149,7 +164,7 @@ export default function App() {
       // Try to query profile with a reasonable timeout
       const profileQuery = supabase
         .from("profiles")
-        .select("role, full_name")
+        .select("role, full_name, banned")
         .eq("id", userId)
         .maybeSingle();
 
@@ -169,17 +184,20 @@ export default function App() {
         // Don't block - just use defaults
         setRole("user");
         setFullName("");
+        setIsBanned(false);
       } else if (data) {
         // Profile exists - use it
         const normalizedRole = String(data.role ?? "user").trim().toLowerCase();
         setRole(normalizedRole);
         setFullName(data.full_name ?? "");
-        console.log(`[loadProfile] Profile loaded: role=${normalizedRole}, name=${data.full_name}`);
+        setIsBanned(Boolean(data.banned));
+        console.log(`[loadProfile] Profile loaded: role=${normalizedRole}, name=${data.full_name}, banned=${data.banned}`);
       } else {
         // No profile found
         console.warn(`[loadProfile] No profile row for user ${userId} - using defaults`);
         setRole("user");
         setFullName("");
+        setIsBanned(false);
       }
     } catch (e) {
       console.error("[loadProfile] Exception:", e?.message);
@@ -212,17 +230,17 @@ export default function App() {
 
       <div className="flex-1">
         <Routes>
-          <Route path="/" element={<Home session={session} role={role} />} />
+          <Route path="/" element={<Home session={session} role={role} isBanned={isBanned} />} />
           <Route path="/products" element={<Products session={session} role={role} />} />
           <Route path="/offers" element={<SpecialOffers />} />
           <Route path="/checkout/:id" element={<Checkout />} />
 
-          <Route path="/login" element={!session ? <Login /> : <Navigate to="/" replace />} />
-          <Route path="/signup" element={!session ? <Signup /> : <Navigate to="/" replace />} />
+          <Route path="/login" element={!session || isBanned ? <Login /> : <Navigate to="/" replace />} />
+          <Route path="/signup" element={!session || isBanned ? <Signup /> : <Navigate to="/" replace />} />
 
-          <Route path="/cart" element={session ? <Cart /> : <Navigate to="/login" replace />} />
-          <Route path="/orders" element={session ? <Orders /> : <Navigate to="/login" replace />} />
-          <Route path="/profile" element={session ? <Profile /> : <Navigate to="/login" replace />} />
+          <Route path="/cart" element={session && !isBanned ? <Cart /> : <Navigate to="/login" replace />} />
+          <Route path="/orders" element={session && !isBanned ? <Orders /> : <Navigate to="/login" replace />} />
+          <Route path="/profile" element={session && !isBanned ? <Profile /> : <Navigate to="/login" replace />} />
 
           <Route
             path="/admin"

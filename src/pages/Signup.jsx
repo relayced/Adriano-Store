@@ -52,23 +52,22 @@ export default function Signup() {
 
     if (!firstClean || !lastClean) return "Please enter your first and last name.";
 
-    const firstLetters = firstClean.replace(/[^A-Za-z]/g, "");
-    const lastLetters = lastClean.replace(/[^A-Za-z]/g, "");
+    const validNamePattern = /^[\p{L} .'-]+$/u;
+    if (!validNamePattern.test(firstClean) || !validNamePattern.test(lastClean)) {
+      return "Names can only include letters, spaces, apostrophes, hyphens, and periods.";
+    }
+
+    const firstLetters = firstClean.replace(/[^\p{L}]/gu, "");
+    const lastLetters = lastClean.replace(/[^\p{L}]/gu, "");
 
     if (firstLetters.length < 2 || lastLetters.length < 2) {
       return "Each name must be at least 2 letters.";
     }
 
-    const isRepeated = (letters) => /^(.)\1+$/.test(letters.toLowerCase());
     const isBlacklisted = (letters) => {
       const blocked = new Set([
         "test",
         "testing",
-        "asdf",
-        "qwerty",
-        "zxcv",
-        "abc",
-        "abcde",
         "unknown",
         "name",
         "firstname",
@@ -77,47 +76,8 @@ export default function Signup() {
       return blocked.has(letters.toLowerCase());
     };
 
-    const vowelCount = (letters) => (letters.match(/[aeiou]/gi) || []).length;
-    const hasVowel = (letters) => /[aeiou]/i.test(letters);
-    const hasLongConsonantStreak = (letters) => {
-      const cleaned = letters.toLowerCase().replace(/[^a-z]/g, "");
-      let streak = 0;
-      for (const ch of cleaned) {
-        if ("aeiou".includes(ch)) {
-          streak = 0;
-        } else {
-          streak += 1;
-          if (streak > 3) return true;
-        }
-      }
-      return false;
-    };
-
-    if (isRepeated(firstLetters) || isRepeated(lastLetters)) {
-      return "Please enter a real first and last name.";
-    }
-
     if (isBlacklisted(firstLetters) || isBlacklisted(lastLetters)) {
-      return "Please enter a real first and last name.";
-    }
-
-    const firstVowels = vowelCount(firstLetters);
-    const lastVowels = vowelCount(lastLetters);
-
-    if (!hasVowel(firstLetters) || !hasVowel(lastLetters) ||
-        hasLongConsonantStreak(firstLetters) || hasLongConsonantStreak(lastLetters)) {
-      return "Please enter a real first and last name.";
-    }
-
-    const firstRatio = firstLetters.length ? firstVowels / firstLetters.length : 0;
-    const lastRatio = lastLetters.length ? lastVowels / lastLetters.length : 0;
-
-    if ((firstLetters.length >= 6 && firstVowels < 2) || (lastLetters.length >= 6 && lastVowels < 2)) {
-      return "Please enter a real first and last name.";
-    }
-
-    if ((firstLetters.length >= 6 && firstRatio < 0.3) || (lastLetters.length >= 6 && lastRatio < 0.3)) {
-      return "Please enter a real first and last name.";
+      return "Please enter a valid first and last name.";
     }
 
     return "";
