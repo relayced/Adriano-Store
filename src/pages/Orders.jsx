@@ -20,6 +20,12 @@ function normalizeItems(items) {
   return [];
 }
 
+function itemProductId(item) {
+  const raw = item?.product_id ?? item?.id ?? item?.productId ?? null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
 function clean(v) {
   const s = String(v ?? "").trim();
   return s ? s : null;
@@ -56,6 +62,10 @@ export default function Orders() {
 
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState(null);
+  const [itemReviewsByProductId, setItemReviewsByProductId] = useState({});
+  const [reviewDraftByProductId, setReviewDraftByProductId] = useState({});
+  const [reviewSavingProductId, setReviewSavingProductId] = useState(null);
+  const [reviewMsg, setReviewMsg] = useState("");
 
   // fallback profile (so "—" doesn't happen if order row has null fields)
   const [fallbackProfile, setFallbackProfile] = useState(null);
@@ -292,6 +302,122 @@ export default function Orders() {
     }
   }
 
+  async function loadSelectedOrderReviews(order) {
+    setItemReviewsByProductId({});
+    setReviewDraftByProductId({});
+    setReviewMsg("");
+
+    if (!order || !userId) return;
+    if (normalizeOrderStatus(order?.status) !== "completed") return;
+
+    const ids = Array.from(
+      new Set(
+        normalizeItems(order.items)
+          .map((it) => itemProductId(it))
+          .filter((id) => id != null)
+      )
+    );
+
+    if (!ids.length) return;
+
+    const { data, error } = await supabase
+      .from("product_reviews")
+      .select("id, product_id, rating, comment, created_at")
+      .eq("user_id", userId)
+      .in("product_id", ids)
+      .order("created_at", { ascending: false });
+
+    if (error) return;
+
+    const latestByProduct = {};
+    for (const row of data || []) {
+      if (!latestByProduct[row.product_id]) {
+        latestByProduct[row.product_id] = row;
+      }
+    }
+
+    setItemReviewsByProductId(latestByProduct);
+
+    const draft = {};
+    for (const id of ids) {
+      const existing = latestByProduct[id];
+      draft[id] = {
+        rating: Number(existing?.rating || 5),
+        comment: existing?.comment || "",
+      };
+    }
+    setReviewDraftByProductId(draft);
+  }
+
+  async function submitItemReview(productId) {
+    if (!selected || !userId) return;
+    if (normalizeOrderStatus(selected?.status) !== "completed") return;
+
+    const draft = reviewDraftByProductId[productId] || { rating: 5, comment: "" };
+    const rating = Number(draft.rating || 0);
+    const comment = String(draft.comment || "").trim();
+
+    if (rating < 1 || rating > 5) {
+      setReviewMsg("Please choose a rating from 1 to 5 stars.");
+      return;
+    }
+    if (!comment) {
+      setReviewMsg("Please add your comment before submitting.");
+      return;
+    }
+
+    try {
+      setReviewSavingProductId(productId);
+      setReviewMsg("");
+
+      const existingId = itemReviewsByProductId[productId]?.id;
+
+      if (existingId) {
+        const { error } = await supabase
+          .from("product_reviews")
+          .update({ rating, comment })
+          .eq("id", existingId)
+          .eq("user_id", userId);
+
+        if (error) {
+          const { error: insertErr } = await supabase
+            .from("product_reviews")
+            .insert({
+              product_id: productId,
+              user_id: userId,
+              rating,
+              comment,
+            });
+
+          if (insertErr) throw insertErr;
+        }
+      } else {
+        const { error } = await supabase
+          .from("product_reviews")
+          .insert({
+            product_id: productId,
+            user_id: userId,
+            rating,
+            comment,
+          });
+        if (error) throw error;
+      }
+
+      await loadSelectedOrderReviews(selected);
+      setReviewMsg("Feedback saved.");
+    } catch (e) {
+      setReviewMsg(e?.message || "Failed to save feedback.");
+    } finally {
+      setReviewSavingProductId(null);
+    }
+  }
+
+  useEffect(() => {
+    if (!open || !selected) return;
+    loadSelectedOrderReviews(selected);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, selected?.id, selected?.status, userId]);
+
   return (
     <main className="mx-auto max-w-5xl px-6 py-10">
       <h2 className="text-2xl font-bold text-emerald-900">Orders</h2>
@@ -503,6 +629,12 @@ export default function Orders() {
             </div>
 
             <div className="p-5 space-y-3">
+              {reviewMsg && (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+                  {reviewMsg}
+                </div>
+              )}
+
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
                 <div className="border border-emerald-200 rounded-xl p-3 bg-emerald-50">
                   <div className="text-xs text-emerald-700">Status</div>
@@ -558,20 +690,82 @@ export default function Orders() {
                     {selectedItems.map((it, idx) => (
                       <div
                         key={`${it.product_id || it.name || idx}`}
-                        className="flex items-start justify-between gap-3 border border-emerald-100 rounded-lg p-2 bg-white"
+                        className="border border-emerald-100 rounded-lg p-2 bg-white"
                       >
-                        <div className="min-w-0">
-                          <div className="font-semibold text-emerald-900 truncate text-sm">
-                            {it.name || "Item"}
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="font-semibold text-emerald-900 truncate text-sm">
+                              {it.name || "Item"}
+                            </div>
+                            <div className="text-xs text-emerald-700">
+                              Qty: {Number(it.qty || 0)} × {money(it.price)}
+                            </div>
                           </div>
-                          <div className="text-xs text-emerald-700">
-                            Qty: {Number(it.qty || 0)} × {money(it.price)}
+
+                          <div className="font-semibold text-emerald-900 shrink-0 text-sm">
+                            {money(Number(it.price || 0) * Number(it.qty || 0))}
                           </div>
                         </div>
 
-                        <div className="font-semibold text-emerald-900 shrink-0 text-sm">
-                          {money(Number(it.price || 0) * Number(it.qty || 0))}
-                        </div>
+                        {normalizeOrderStatus(selected?.status) === "completed" && itemProductId(it) != null && (
+                          <div className="mt-3 border-t border-emerald-100 pt-3">
+                            <div className="text-xs font-medium text-emerald-800">Satisfaction feedback</div>
+
+                            <div className="mt-2 flex items-center gap-1" aria-label="Choose rating">
+                              {[1, 2, 3, 4, 5].map((n) => (
+                                <button
+                                  key={n}
+                                  type="button"
+                                  onClick={() => {
+                                    const pid = itemProductId(it);
+                                    if (pid == null) return;
+                                    setReviewDraftByProductId((prev) => ({
+                                      ...prev,
+                                      [pid]: {
+                                        rating: n,
+                                        comment: prev[pid]?.comment || "",
+                                      },
+                                    }));
+                                  }}
+                                  className={`text-xl leading-none ${(reviewDraftByProductId[itemProductId(it)]?.rating || 5) >= n ? "text-amber-500" : "text-gray-300"}`}
+                                  aria-label={`${n} star${n > 1 ? "s" : ""}`}
+                                >
+                                  ★
+                                </button>
+                              ))}
+                            </div>
+
+                            <textarea
+                              value={reviewDraftByProductId[itemProductId(it)]?.comment || ""}
+                              onChange={(e) => {
+                                const pid = itemProductId(it);
+                                if (pid == null) return;
+                                const nextComment = e.target.value;
+                                setReviewDraftByProductId((prev) => ({
+                                  ...prev,
+                                  [pid]: {
+                                    rating: prev[pid]?.rating || 5,
+                                    comment: nextComment,
+                                  },
+                                }));
+                              }}
+                              rows={3}
+                              placeholder="Share if you're satisfied with this item..."
+                              className="mt-2 w-full border border-emerald-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                            />
+
+                            <div className="mt-2 flex justify-end">
+                              <button
+                                type="button"
+                                onClick={() => submitItemReview(itemProductId(it))}
+                                disabled={reviewSavingProductId === itemProductId(it)}
+                                className="px-3 py-1.5 text-xs rounded-lg bg-emerald-700 text-white hover:bg-emerald-800 disabled:opacity-50"
+                              >
+                                {reviewSavingProductId === itemProductId(it) ? "Saving..." : "Save feedback"}
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>

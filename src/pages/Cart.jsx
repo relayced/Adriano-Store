@@ -242,6 +242,16 @@ export default function Cart() {
 
   const grandTotal = Math.max(0, subtotal - discount + shippingFee);
 
+  const productTotal = useMemo(() => {
+    if (checkoutItemProductId) {
+      const selectedItem = items.find((x) => x.product_id === checkoutItemProductId);
+      if (!selectedItem) return 0;
+      return Number(selectedItem.price || 0) * Number(selectedItem.qty || 0);
+    }
+
+    return subtotal;
+  }, [checkoutItemProductId, items, subtotal]);
+
   function applyCoupon() {
     setCouponMsg("");
     const code = coupon.trim().toUpperCase();
@@ -440,13 +450,27 @@ export default function Cart() {
           <h2 className="text-3xl font-bold text-emerald-900">Shopping Cart</h2>
           <p className="text-sm text-emerald-700 mt-1">Review and checkout your order.</p>
         </div>
-        <button
-          type="button"
-          onClick={() => setItemsState(getCart())}
-          className="px-4 py-2 rounded-lg border border-emerald-900/20 text-emerald-700 hover:bg-emerald-50 w-fit transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
-        >
-          Refresh cart
-        </button>
+        <div className="flex flex-col gap-2 w-fit">
+          <button
+            type="button"
+            onClick={() => setItemsState(getCart())}
+            className="px-4 py-2 rounded-lg border border-emerald-900/20 text-emerald-700 hover:bg-emerald-50 w-fit transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+          >
+            Refresh cart
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setErr("");
+              setCheckoutItemProductId(null);
+              setShowCheckout(true);
+            }}
+            disabled={items.length === 0}
+            className="px-4 py-2 rounded-lg bg-emerald-700 text-white hover:bg-emerald-800 disabled:opacity-50 disabled:cursor-not-allowed w-fit transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+          >
+            Checkout all
+          </button>
+        </div>
       </div>
 
       <div className="mt-6 grid grid-cols-1 md:grid-cols-[280px_1fr] gap-6">
@@ -484,6 +508,13 @@ export default function Cart() {
                   <div className="flex-1 min-w-0">
                     <div className="font-semibold text-emerald-900 truncate">{x.name}</div>
                     <div className="text-sm text-emerald-700">{money(x.price)}</div>
+                    {(x.options?.length || x.options?.color) && (
+                      <div className="text-xs text-emerald-700">
+                        {x.options?.length ? `Length: ${x.options.length}` : ""}
+                        {x.options?.length && x.options?.color ? " • " : ""}
+                        {x.options?.color ? `Color: ${x.options.color}` : ""}
+                      </div>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-2">
@@ -589,11 +620,41 @@ export default function Cart() {
                     </div>
                   )}
 
-                  {/* Shipping fee section */}
-                  <div className="pt-3 border-t border-emerald-200 flex justify-between text-sm">
-                    <span className="text-emerald-700">Shipping fee</span>
-                    <span className="font-semibold text-emerald-900">{money(shippingFee)}</span>
-                  </div>
+                  {/* Product list for checkout all */}
+                  {!checkoutItemProductId && items.length > 0 && (
+                    <div className="border border-emerald-200 rounded-xl p-4 bg-emerald-50">
+                      <div className="text-sm font-semibold text-emerald-900">Products</div>
+
+                      <div className="mt-3 space-y-2">
+                        {items.map((x) => (
+                          <div
+                            key={`checkout-all-${x.product_id}`}
+                            className="flex items-center justify-between gap-3 rounded-lg border border-emerald-100 bg-white px-3 py-2"
+                          >
+                            <div className="min-w-0">
+                              <div className="text-sm font-medium text-emerald-900 truncate">{x.name}</div>
+                              <div className="text-xs text-emerald-700">Qty: {Number(x.qty || 0)} × {money(x.price)}</div>
+                              {(x.options?.length || x.options?.color) && (
+                                <div className="text-xs text-emerald-700">
+                                  {x.options?.length ? `Length: ${x.options.length}` : ""}
+                                  {x.options?.length && x.options?.color ? " • " : ""}
+                                  {x.options?.color ? `Color: ${x.options.color}` : ""}
+                                </div>
+                              )}
+                            </div>
+                            <div className="text-sm font-semibold text-emerald-900 shrink-0">
+                              {money(Number(x.price || 0) * Number(x.qty || 0))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="mt-4 pt-3 border-t border-emerald-200 flex justify-between">
+                        <span className="text-emerald-700 font-medium">Products subtotal</span>
+                        <span className="font-semibold text-emerald-900">{money(subtotal)}</span>
+                      </div>
+                    </div>
+                  )}
 
                   {loadingUser && <p className="mt-4 text-emerald-700">Loading account…</p>}
 
@@ -662,29 +723,6 @@ export default function Cart() {
                         placeholder="House no., street, landmarks"
                       />
                     </div>
-                  </div>
-
-                  {/* Shipping */}
-                  <div className="mt-5 border border-emerald-200 rounded-xl p-4 bg-emerald-50">
-                    <div className="mb-3">
-                      <div className="text-sm font-semibold text-emerald-900">Shipping fee</div>
-                      <div className="text-xs text-emerald-700">
-                        Based on your selected barangay
-                      </div>
-                    </div>
-
-                    <div className="mt-3 flex justify-between text-sm">
-                      <span className="text-emerald-700 font-medium">
-                        {barangay ? `${barangay} → ` : ""}Shipping fee
-                      </span>
-                      <span className="font-semibold text-emerald-900">{money(shippingFee)}</span>
-                    </div>
-
-                    {!barangay && (
-                      <div className="mt-3 p-3 rounded-lg bg-amber-100 border border-amber-300">
-                        <p className="text-sm text-amber-800 font-medium">⚠️ Please select your barangay to calculate shipping cost.</p>
-                      </div>
-                    )}
                   </div>
 
                   {/* Coupon */}
@@ -790,11 +828,16 @@ export default function Cart() {
                     )}
                   </div>
 
+                  <div className="mt-6 flex items-center justify-between border-t border-emerald-200 pt-3">
+                    <div className="text-xs font-medium text-emerald-900">Total cost</div>
+                    <div className="text-lg font-bold text-emerald-900">{money(productTotal + shippingFee)}</div>
+                  </div>
+
                   <button
                     type="button"
                     onClick={placeOrder}
                     disabled={placing || items.length === 0 || uploadingProof}
-                    className="mt-6 w-full px-4 py-2 rounded-lg bg-emerald-700 text-white text-sm font-semibold hover:bg-emerald-800 disabled:opacity-50 transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+                    className="mt-3 w-full px-4 py-2 rounded-lg bg-emerald-700 text-white text-sm font-semibold hover:bg-emerald-800 disabled:opacity-50 transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
                   >
                     {placing ? "Placing order…" : "Place order"}
                   </button>

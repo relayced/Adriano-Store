@@ -118,33 +118,34 @@ export default function ProfileSidebar() {
     } catch {
       // ignore timeouts; we still force logout UI-side
     }
-    localStorage.removeItem("cart");
     navigate("/login", { replace: true });
   }
 
   return (
-    <aside className="border border-emerald-200 rounded-xl bg-emerald-50 p-4 w-full max-w-sm">
-      <div className="mb-3">
-        <div className="text-xs text-emerald-700">Signed in as</div>
-        <div className="text-sm font-semibold break-all text-emerald-900">{email}</div>
+    <aside className="bg-white/95 border border-emerald-100 rounded-2xl shadow-sm p-2.5 w-full max-w-sm">
+      <div className="px-3 pt-2 pb-3">
+        <div className="text-xs text-gray-500">Signed in as</div>
+        <div className="text-sm font-semibold break-all text-gray-900">{email}</div>
 
         {isAdmin && (
-          <span className="inline-block mt-2 text-xs px-2 py-0.5 rounded-full bg-emerald-700 text-white">
+          <span className="inline-block mt-2 text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
             Admin
           </span>
         )}
       </div>
 
-      <nav className="space-y-1">
+      <nav className="space-y-1.5">
         {links.map((l) => (
           <Link
             key={l.to}
             to={l.to}
-            className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm border transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 ${
-              isActive(l.to) ? "bg-emerald-700 text-white border-emerald-700" : "border-emerald-200 text-emerald-700 hover:bg-emerald-100"
+            className={`w-full flex items-center justify-between gap-2.5 text-left px-3 py-2 rounded-xl text-sm font-medium border transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 ${
+              isActive(l.to)
+                ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                : "bg-white border-transparent text-gray-700 hover:bg-emerald-50/70 hover:text-emerald-700"
             }`}
           >
-            <span className="flex items-center gap-2">
+            <span className="flex items-center gap-2.5">
               <span className="shrink-0">
                 <SidebarIcon name={l.icon} />
               </span>
@@ -152,7 +153,7 @@ export default function ProfileSidebar() {
             </span>
 
             {l.badge && (
-              <span className={`text-xs px-2 py-0.5 rounded-full ${isActive(l.to) ? "bg-white/20" : "bg-emerald-200 text-emerald-900"}`}>
+              <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-white/80 border border-emerald-200 text-emerald-800">
                 {l.badge}
               </span>
             )}
@@ -162,8 +163,10 @@ export default function ProfileSidebar() {
         {isAdmin && (
           <Link
             to="/admin"
-            className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm border transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 ${
-              isActive("/admin") ? "bg-emerald-700 text-white border-emerald-700" : "border-emerald-200 text-emerald-700 hover:bg-emerald-100"
+            className={`w-full flex items-center gap-2.5 text-left px-3 py-2 rounded-xl text-sm font-medium border transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 ${
+              isActive("/admin")
+                ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                : "bg-white border-transparent text-gray-700 hover:bg-emerald-50/70 hover:text-emerald-700"
             }`}
           >
             <SidebarIcon name="admin" /> Admin
@@ -171,7 +174,10 @@ export default function ProfileSidebar() {
         )}
       </nav>
 
-      <button onClick={logout} className="mt-4 w-full px-3 py-2 text-sm rounded-lg border border-emerald-200 text-emerald-700 hover:bg-emerald-100 transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2">
+      <button
+        onClick={logout}
+        className="mt-3 w-full px-3 py-2 text-sm rounded-xl border border-emerald-200 text-emerald-700 hover:bg-emerald-50/70 transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+      >
         Log out
       </button>
     </aside>

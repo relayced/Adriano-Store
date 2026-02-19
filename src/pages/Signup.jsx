@@ -34,7 +34,8 @@ const BARANGAYS = [
 ];
 
 export default function Signup() {
-  const [fullName, setFullName] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [contactNumber, setContactNumber] = useState("");
   const [barangay, setBarangay] = useState("");
   const [address, setAddress] = useState("");
@@ -45,13 +46,118 @@ export default function Signup() {
   const [busy, setBusy] = useState(false);
   const navigate = useNavigate();
 
+  function validateNameParts(first, last) {
+    const firstClean = String(first || "").trim().replace(/\s+/g, " ");
+    const lastClean = String(last || "").trim().replace(/\s+/g, " ");
+
+    if (!firstClean || !lastClean) return "Please enter your first and last name.";
+
+    const firstLetters = firstClean.replace(/[^A-Za-z]/g, "");
+    const lastLetters = lastClean.replace(/[^A-Za-z]/g, "");
+
+    if (firstLetters.length < 2 || lastLetters.length < 2) {
+      return "Each name must be at least 2 letters.";
+    }
+
+    const isRepeated = (letters) => /^(.)\1+$/.test(letters.toLowerCase());
+    const isBlacklisted = (letters) => {
+      const blocked = new Set([
+        "test",
+        "testing",
+        "asdf",
+        "qwerty",
+        "zxcv",
+        "abc",
+        "abcde",
+        "unknown",
+        "name",
+        "firstname",
+        "lastname",
+      ]);
+      return blocked.has(letters.toLowerCase());
+    };
+
+    const vowelCount = (letters) => (letters.match(/[aeiou]/gi) || []).length;
+    const hasVowel = (letters) => /[aeiou]/i.test(letters);
+    const hasLongConsonantStreak = (letters) => {
+      const cleaned = letters.toLowerCase().replace(/[^a-z]/g, "");
+      let streak = 0;
+      for (const ch of cleaned) {
+        if ("aeiou".includes(ch)) {
+          streak = 0;
+        } else {
+          streak += 1;
+          if (streak > 3) return true;
+        }
+      }
+      return false;
+    };
+
+    if (isRepeated(firstLetters) || isRepeated(lastLetters)) {
+      return "Please enter a real first and last name.";
+    }
+
+    if (isBlacklisted(firstLetters) || isBlacklisted(lastLetters)) {
+      return "Please enter a real first and last name.";
+    }
+
+    const firstVowels = vowelCount(firstLetters);
+    const lastVowels = vowelCount(lastLetters);
+
+    if (!hasVowel(firstLetters) || !hasVowel(lastLetters) ||
+        hasLongConsonantStreak(firstLetters) || hasLongConsonantStreak(lastLetters)) {
+      return "Please enter a real first and last name.";
+    }
+
+    const firstRatio = firstLetters.length ? firstVowels / firstLetters.length : 0;
+    const lastRatio = lastLetters.length ? lastVowels / lastLetters.length : 0;
+
+    if ((firstLetters.length >= 6 && firstVowels < 2) || (lastLetters.length >= 6 && lastVowels < 2)) {
+      return "Please enter a real first and last name.";
+    }
+
+    if ((firstLetters.length >= 6 && firstRatio < 0.3) || (lastLetters.length >= 6 && lastRatio < 0.3)) {
+      return "Please enter a real first and last name.";
+    }
+
+    return "";
+  }
+
+  function validateContactNumber(value) {
+    const digits = String(value || "").replace(/\D/g, "");
+    if (!digits) return "Contact number is required.";
+
+    const isLocal = digits.length === 11 && digits.startsWith("09");
+    const isIntl = digits.length === 12 && digits.startsWith("63") && digits[2] === "9";
+
+    if (!isLocal && !isIntl) {
+      return "Please enter a valid PH mobile number (09xxxxxxxxx or +639xxxxxxxxx).";
+    }
+
+    return "";
+  }
+
   async function handleSignup(e) {
     e.preventDefault();
     setMsg("");
 
+    const nameError = validateNameParts(firstName, lastName);
+    if (nameError) {
+      setMsg(nameError);
+      return;
+    }
+
+    const fullName = `${firstName.trim()} ${lastName.trim()}`.trim();
+
     // Validate Gmail only
     if (!email.endsWith("@gmail.com")) {
       setMsg("Please use a Gmail address (@gmail.com)");
+      return;
+    }
+
+    const contactError = validateContactNumber(contactNumber);
+    if (contactError) {
+      setMsg(contactError);
       return;
     }
 
@@ -70,6 +176,8 @@ export default function Signup() {
         password,
         options: {
           data: {
+            first_name: firstName.trim(),
+            last_name: lastName.trim(),
             full_name: fullName,
             contact_number: contactNumber,
             barangay: barangay,
@@ -138,15 +246,27 @@ export default function Signup() {
           </p>
 
           <form className="mt-6 space-y-4" onSubmit={handleSignup}>
-            <div className="space-y-1">
-              <label className="text-sm font-semibold text-emerald-900">Full name</label>
-              <input
-                className="w-full border border-emerald-900/20 rounded-xl px-4 py-2 outline-none focus:ring-2 focus:ring-emerald-600 transition"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                placeholder="Your name"
-                required
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="text-sm font-semibold text-emerald-900">First name</label>
+                <input
+                  className="w-full border border-emerald-900/20 rounded-xl px-4 py-2 outline-none focus:ring-2 focus:ring-emerald-600 transition"
+                  value={firstName}
+                  onChange={(e) => setFirstName(e.target.value)}
+                  placeholder="First name"
+                  required
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-semibold text-emerald-900">Last name</label>
+                <input
+                  className="w-full border border-emerald-900/20 rounded-xl px-4 py-2 outline-none focus:ring-2 focus:ring-emerald-600 transition"
+                  value={lastName}
+                  onChange={(e) => setLastName(e.target.value)}
+                  placeholder="Last name"
+                  required
+                />
+              </div>
             </div>
 
             <div className="space-y-1">
@@ -155,7 +275,9 @@ export default function Signup() {
                 className="w-full border border-emerald-900/20 rounded-xl px-4 py-2 outline-none focus:ring-2 focus:ring-emerald-600 transition"
                 value={contactNumber}
                 onChange={(e) => setContactNumber(e.target.value)}
-                placeholder="09xxxxxxxxx"
+                placeholder="09xxxxxxxxx or +639xxxxxxxxx"
+                type="tel"
+                inputMode="numeric"
                 required
               />
             </div>
@@ -260,6 +382,13 @@ export default function Signup() {
             </button>
 
             {msg && <p className="text-sm text-red-600 font-semibold">{msg}</p>}
+
+            <p className="text-xs text-emerald-700 text-center">
+              By signing up, you agree to Adriano Store School Supplies{" "}
+              <span className="font-semibold underline underline-offset-2">Terms and Conditions</span>
+              {" "}&{" "}
+              <span className="font-semibold underline underline-offset-2">Privacy Policy</span>.
+            </p>
 
             <p className="text-sm text-emerald-700">
               Already have an account?{" "}

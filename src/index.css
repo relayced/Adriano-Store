@@ -1,1 +1,108 @@
 @import "tailwindcss";
+
+:root {
+	color: #2f2a24;
+	background-color: #f6f2ec;
+}
+
+body {
+	background-color: #f6f2ec;
+	color: #2f2a24;
+}
+
+.app-theme-soft {
+	background-color: #f6f2ec;
+	color: #2f2a24;
+}
+
+.app-theme-soft .bg-white {
+	background-color: #fcfaf6;
+}
+
+.app-theme-soft .bg-gray-50 {
+	background-color: #f6f2ec;
+}
+
+.app-theme-soft .text-emerald-900 {
+	color: #254236;
+}
+
+.app-theme-soft .text-emerald-800 {
+	color: #2e4d3f;
+}
+
+.app-theme-soft .text-emerald-700 {
+	color: #3a5f4f;
+}
+
+.app-theme-soft .text-emerald-600 {
+	color: #4a7060;
+}
+
+.app-theme-soft .bg-emerald-800 {
+	background-color: #2e4d3f;
+}
+
+.app-theme-soft .bg-emerald-700 {
+	background-color: #3a5f4f;
+}
+
+.app-theme-soft .bg-emerald-100 {
+	background-color: #e5eee7;
+}
+
+.app-theme-soft .bg-emerald-50 {
+	background-color: #f1f6f2;
+}
+
+.app-theme-soft .border-emerald-200 {
+	border-color: #cfe0d4;
+}
+
+.app-theme-soft .border-emerald-100 {
+	border-color: #deebe2;
+}
+
+.app-theme-soft .ring-emerald-500 {
+	--tw-ring-color: #5a8071;
+}
+
+.app-theme-soft .hover\:bg-emerald-100:hover {
+	background-color: #e5eee7;
+}
+
+.app-theme-soft .hover\:bg-emerald-200:hover {
+	background-color: #dbe7df;
+}
+
+@keyframes spinner-color-cycle {
+	0% {
+		border-top-color: #3a5f4f;
+	}
+	33% {
+		border-top-color: #8f6b3f;
+	}
+	66% {
+		border-top-color: #6a7d5f;
+	}
+	100% {
+		border-top-color: #3a5f4f;
+	}
+}
+
+.spinner-rotate {
+	animation: spinner-rotate 0.9s linear infinite;
+}
+
+.spinner-color-cycle {
+	animation: spinner-color-cycle 2.4s linear infinite;
+}
+
+@keyframes spinner-rotate {
+	0% {
+		transform: rotate(0deg);
+	}
+	100% {
+		transform: rotate(360deg);
+	}
+}

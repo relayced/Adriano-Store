@@ -53,6 +53,24 @@ export default function App() {
   const [role, setRole] = useState("user");
   const [fullName, setFullName] = useState("");
   const [loadingProfile, setLoadingProfile] = useState(false);
+  const [adminNeedsLandscape, setAdminNeedsLandscape] = useState(false);
+
+  useEffect(() => {
+    function updateAdminOrientationGate() {
+      const isMobile = window.matchMedia("(max-width: 768px)").matches;
+      const isPortrait = window.matchMedia("(orientation: portrait)").matches;
+      setAdminNeedsLandscape(isMobile && isPortrait);
+    }
+
+    updateAdminOrientationGate();
+    window.addEventListener("resize", updateAdminOrientationGate);
+    window.addEventListener("orientationchange", updateAdminOrientationGate);
+
+    return () => {
+      window.removeEventListener("resize", updateAdminOrientationGate);
+      window.removeEventListener("orientationchange", updateAdminOrientationGate);
+    };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -175,51 +193,73 @@ export default function App() {
   }
 
   return (
-    <div className="bg-gray-50 min-h-screen">
+    <div className="app-theme-soft bg-[#f6f2ec] min-h-screen flex flex-col">
       <SupabaseDebug />
       <Navbar session={session} />
 
       {/* ✅ never blocks the site */}
       {session && loadingProfile && (
-        <div className="border-b bg-white">
-          <div className="mx-auto max-w-6xl px-6 py-2 text-xs text-gray-500">
-            Loading account…
+        <div className="fixed inset-0 z-50 pointer-events-none flex items-center justify-center">
+          <div className="flex items-center gap-3 rounded-full border border-emerald-100 bg-white px-5 py-3 shadow-sm">
+            <div
+              className="h-5 w-5 rounded-full border-2 border-emerald-100 border-t-emerald-600"
+              style={{ animation: "spinner-rotate 0.9s linear infinite, spinner-color-cycle 2.4s linear infinite" }}
+            />
+            <span className="text-sm font-semibold text-emerald-800">Website loading…</span>
           </div>
         </div>
       )}
 
-      <Routes>
-        <Route path="/" element={<Home session={session} role={role} />} />
-        <Route path="/products" element={<Products session={session} role={role} />} />
-        <Route path="/offers" element={<SpecialOffers />} />
-        <Route path="/checkout/:id" element={<Checkout />} />
+      <div className="flex-1">
+        <Routes>
+          <Route path="/" element={<Home session={session} role={role} />} />
+          <Route path="/products" element={<Products session={session} role={role} />} />
+          <Route path="/offers" element={<SpecialOffers />} />
+          <Route path="/checkout/:id" element={<Checkout />} />
 
-        <Route path="/login" element={!session ? <Login /> : <Navigate to="/" replace />} />
-        <Route path="/signup" element={!session ? <Signup /> : <Navigate to="/" replace />} />
+          <Route path="/login" element={!session ? <Login /> : <Navigate to="/" replace />} />
+          <Route path="/signup" element={!session ? <Signup /> : <Navigate to="/" replace />} />
 
-        <Route path="/cart" element={session ? <Cart /> : <Navigate to="/login" replace />} />
-        <Route path="/orders" element={session ? <Orders /> : <Navigate to="/login" replace />} />
-        <Route path="/profile" element={session ? <Profile /> : <Navigate to="/login" replace />} />
+          <Route path="/cart" element={session ? <Cart /> : <Navigate to="/login" replace />} />
+          <Route path="/orders" element={session ? <Orders /> : <Navigate to="/login" replace />} />
+          <Route path="/profile" element={session ? <Profile /> : <Navigate to="/login" replace />} />
 
-        <Route
-          path="/admin"
-          element={
-            !session ? (
-              <Navigate to="/login" replace />
-            ) : loadingProfile ? (
-              <div className="mx-auto max-w-5xl px-6 py-10 text-gray-600">
-                Checking admin access…
-              </div>
-            ) : role === "admin" ? (
-              <Admin />
-            ) : (
-              <Navigate to="/" replace />
-            )
-          }
-        />
+          <Route
+            path="/admin"
+            element={
+              !session ? (
+                <Navigate to="/login" replace />
+              ) : loadingProfile ? (
+                <div className="mx-auto max-w-5xl px-6 py-10 text-gray-600">
+                  Checking admin access…
+                </div>
+              ) : adminNeedsLandscape ? (
+                <div className="mx-auto max-w-5xl px-6 py-10">
+                  <div className="rounded-2xl border border-emerald-200 bg-white p-6 text-center">
+                    <div className="text-2xl">📱</div>
+                    <div className="mt-2 text-lg font-semibold text-emerald-900">Rotate your phone</div>
+                    <div className="mt-1 text-sm text-emerald-700">
+                      Please tilt your phone to landscape to access the admin page.
+                    </div>
+                  </div>
+                </div>
+              ) : role === "admin" ? (
+                <Admin />
+              ) : (
+                <Navigate to="/" replace />
+              )
+            }
+          />
 
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </div>
+
+      <footer className="border-t border-emerald-900/10 bg-white mt-auto">
+        <div className="mx-auto max-w-6xl px-6 py-4 text-center text-sm text-emerald-900">
+          © 2026 Adriano Store School Supplies
+        </div>
+      </footer>
     </div>
   );
 }

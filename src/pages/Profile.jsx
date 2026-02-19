@@ -42,13 +42,113 @@ export default function Profile() {
   const [email, setEmail] = useState("");
   const [userId, setUserId] = useState("");
 
-  const [fullName, setFullName] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [contactNumber, setContactNumber] = useState("");
   const [barangay, setBarangay] = useState("");
   const [address, setAddress] = useState("");
 
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
+
+  function splitFullName(value) {
+    const cleaned = String(value || "").trim().replace(/\s+/g, " ");
+    if (!cleaned) return { first: "", last: "" };
+    const parts = cleaned.split(" ");
+    if (parts.length === 1) return { first: parts[0], last: "" };
+    return { first: parts[0], last: parts.slice(1).join(" ") };
+  }
+
+  function validateNameParts(first, last) {
+    const firstClean = String(first || "").trim().replace(/\s+/g, " ");
+    const lastClean = String(last || "").trim().replace(/\s+/g, " ");
+
+    if (!firstClean || !lastClean) return "Please enter your first and last name.";
+
+    const firstLetters = firstClean.replace(/[^A-Za-z]/g, "");
+    const lastLetters = lastClean.replace(/[^A-Za-z]/g, "");
+
+    if (firstLetters.length < 2 || lastLetters.length < 2) {
+      return "Each name must be at least 2 letters.";
+    }
+
+    const isRepeated = (letters) => /^(.)\1+$/.test(letters.toLowerCase());
+    const isBlacklisted = (letters) => {
+      const blocked = new Set([
+        "test",
+        "testing",
+        "asdf",
+        "qwerty",
+        "zxcv",
+        "abc",
+        "abcde",
+        "unknown",
+        "name",
+        "firstname",
+        "lastname",
+      ]);
+      return blocked.has(letters.toLowerCase());
+    };
+
+    const vowelCount = (letters) => (letters.match(/[aeiou]/gi) || []).length;
+    const hasVowel = (letters) => /[aeiou]/i.test(letters);
+    const hasLongConsonantStreak = (letters) => {
+      const cleaned = letters.toLowerCase().replace(/[^a-z]/g, "");
+      let streak = 0;
+      for (const ch of cleaned) {
+        if ("aeiou".includes(ch)) {
+          streak = 0;
+        } else {
+          streak += 1;
+          if (streak > 3) return true;
+        }
+      }
+      return false;
+    };
+
+    if (isRepeated(firstLetters) || isRepeated(lastLetters)) {
+      return "Please enter a real first and last name.";
+    }
+
+    if (isBlacklisted(firstLetters) || isBlacklisted(lastLetters)) {
+      return "Please enter a real first and last name.";
+    }
+
+    const firstVowels = vowelCount(firstLetters);
+    const lastVowels = vowelCount(lastLetters);
+
+    if (!hasVowel(firstLetters) || !hasVowel(lastLetters) ||
+        hasLongConsonantStreak(firstLetters) || hasLongConsonantStreak(lastLetters)) {
+      return "Please enter a real first and last name.";
+    }
+
+    const firstRatio = firstLetters.length ? firstVowels / firstLetters.length : 0;
+    const lastRatio = lastLetters.length ? lastVowels / lastLetters.length : 0;
+
+    if ((firstLetters.length >= 6 && firstVowels < 2) || (lastLetters.length >= 6 && lastVowels < 2)) {
+      return "Please enter a real first and last name.";
+    }
+
+    if ((firstLetters.length >= 6 && firstRatio < 0.3) || (lastLetters.length >= 6 && lastRatio < 0.3)) {
+      return "Please enter a real first and last name.";
+    }
+
+    return "";
+  }
+
+  function validateContactNumber(value) {
+    const digits = String(value || "").replace(/\D/g, "");
+    if (!digits) return "Contact number is required.";
+
+    const isLocal = digits.length === 11 && digits.startsWith("09");
+    const isIntl = digits.length === 12 && digits.startsWith("63") && digits[2] === "9";
+
+    if (!isLocal && !isIntl) {
+      return "Please enter a valid PH mobile number (09xxxxxxxxx or +639xxxxxxxxx).";
+    }
+
+    return "";
+  }
 
   useEffect(() => {
     let alive = true;
@@ -97,7 +197,9 @@ export default function Profile() {
 
       if (profile) {
         // Profile exists - use it
-        setFullName(profile.full_name ?? "");
+        const parsed = splitFullName(profile.full_name);
+        setFirstName(parsed.first);
+        setLastName(parsed.last);
         setContactNumber(profile.contact_number ?? "");
         setBarangay(profile.barangay ?? "");
         setAddress(profile.address ?? "");
@@ -106,10 +208,14 @@ export default function Profile() {
         console.warn("No profile row found, creating from auth metadata...");
         
         const metadata = user?.user_metadata || {};
+        const metaFirst = (metadata.first_name || "").trim();
+        const metaLast = (metadata.last_name || "").trim();
+        const parsed = metaFirst || metaLast ? { first: metaFirst, last: metaLast } : splitFullName(metadata.full_name);
+        const fullName = `${parsed.first} ${parsed.last}`.trim();
         const payload = {
           id: user.id,
           email: user.email || "",
-          full_name: (metadata.full_name || "").trim(),
+          full_name: fullName,
           contact_number: (metadata.contact_number || "").trim(),
           barangay: (metadata.barangay || "").trim(),
           address: (metadata.address || "").trim(),
@@ -128,14 +234,17 @@ export default function Profile() {
             // Still set the data from metadata so user can see and edit
           }
 
-          setFullName(payload.full_name);
+          const parsedPayload = splitFullName(payload.full_name);
+          setFirstName(parsedPayload.first);
+          setLastName(parsedPayload.last);
           setContactNumber(payload.contact_number);
           setBarangay(payload.barangay);
           setAddress(payload.address);
         } catch (e) {
           console.warn("Profile creation error:", e);
           // Set from metadata anyway
-          setFullName((metadata.full_name || "").trim());
+          setFirstName(parsed.first);
+          setLastName(parsed.last);
           setContactNumber((metadata.contact_number || "").trim());
           setBarangay((metadata.barangay || "").trim());
           setAddress((metadata.address || "").trim());
@@ -156,6 +265,22 @@ export default function Profile() {
     setSaving(true);
     setMsg("");
     setErr("");
+
+    const nameError = validateNameParts(firstName, lastName);
+    if (nameError) {
+      setErr(nameError);
+      setSaving(false);
+      return;
+    }
+
+    const contactError = validateContactNumber(contactNumber);
+    if (contactError) {
+      setErr(contactError);
+      setSaving(false);
+      return;
+    }
+
+    const fullName = `${firstName.trim()} ${lastName.trim()}`.trim();
 
     try {
       const payload = {
@@ -242,12 +367,22 @@ export default function Profile() {
                   <h3 className="text-sm font-semibold text-emerald-900 mb-3">Personal Information</h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <label className="text-xs text-emerald-700 font-medium">Full name</label>
+                      <label className="text-xs text-emerald-700 font-medium">First name</label>
                       <input
-                        value={fullName}
-                        onChange={(e) => setFullName(e.target.value)}
+                        value={firstName}
+                        onChange={(e) => setFirstName(e.target.value)}
                         className="mt-1.5 w-full border border-emerald-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                        placeholder="Your full name"
+                        placeholder="First name"
+                        disabled={loading}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-emerald-700 font-medium">Last name</label>
+                      <input
+                        value={lastName}
+                        onChange={(e) => setLastName(e.target.value)}
+                        className="mt-1.5 w-full border border-emerald-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                        placeholder="Last name"
                         disabled={loading}
                       />
                     </div>
@@ -257,7 +392,9 @@ export default function Profile() {
                         value={contactNumber}
                         onChange={(e) => setContactNumber(e.target.value)}
                         className="mt-1.5 w-full border border-emerald-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                        placeholder="09xx xxx xxxx"
+                        placeholder="09xxxxxxxxx or +639xxxxxxxxx"
+                        type="tel"
+                        inputMode="numeric"
                         disabled={loading}
                       />
                     </div>

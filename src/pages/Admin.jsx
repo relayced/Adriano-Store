@@ -5,12 +5,34 @@ import { supabase } from "../supabaseClient";
 const ORDER_STATUSES = ["To Ship", "Out for Delivery", "Completed", "Cancelled"];
 const PRODUCT_IMG_BUCKET = "product-images";
 const DEFAULT_CATEGORIES = ["Notebooks", "Pens", "Pencils", "Paper", "Accessories", "Paintings"];
+const CATEGORY_ALIASES = {
+  accesories: "accessories",
+};
 
 function money(n) {
   return `₱${Number(n || 0).toFixed(2)}`;
 }
 function safeLower(x) {
   return String(x || "").toLowerCase();
+}
+function normalizeCategoryKey(value) {
+  const raw = String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+  if (!raw) return "";
+  return CATEGORY_ALIASES[raw] || raw;
+}
+function buildCategoryList(values) {
+  const defaultMap = new Map(
+    DEFAULT_CATEGORIES.map((c) => [normalizeCategoryKey(c), c])
+  );
+  const byKey = new Map();
+
+  for (const val of values) {
+    const key = normalizeCategoryKey(val);
+    if (!key) continue;
+    if (!byKey.has(key)) byKey.set(key, defaultMap.get(key) || String(val).trim());
+  }
+
+  return Array.from(byKey.values()).sort();
 }
 function toStr(x) {
   return x === null || x === undefined ? "" : String(x);
@@ -142,7 +164,14 @@ export default function Admin() {
     category: "",
     stock: "0",
     image_url: "",
+    length_options: [],
+    color_options: [],
   });
+
+  const LENGTH_PRESETS = ["Long", "Short"];
+  const COLOR_PRESETS = ["Assorted", "Black", "Blue", "Red", "Green"];
+  const [customLength, setCustomLength] = useState("");
+  const [customColor, setCustomColor] = useState("");
 
   const [productImageFile, setProductImageFile] = useState(null);
   const [productImagePreview, setProductImagePreview] = useState("");
@@ -233,6 +262,25 @@ export default function Admin() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("admin_delivery_history");
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) setDeliveryHistory(parsed);
+    } catch {
+      // ignore storage parse errors
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("admin_delivery_history", JSON.stringify(deliveryHistory));
+    } catch {
+      // ignore storage write errors
+    }
+  }, [deliveryHistory]);
+
   // Close user menu on outside click
   useEffect(() => {
     if (!userMenuOpen && !productMenuOpen && !salesFilterMenuOpen) return;
@@ -259,7 +307,7 @@ export default function Admin() {
       setPLoading(true);
       const { data, error } = await supabase
         .from("products")
-        .select("id, name, description, price, category, stock, image_url")
+        .select("id, name, description, price, category, stock, image_url, length_options, color_options")
         .order("id", { ascending: false });
 
       if (error) throw error;
@@ -390,6 +438,34 @@ export default function Admin() {
     }
   }
 
+  function normalizeOptionArray(value) {
+    if (!value) return [];
+    if (Array.isArray(value)) return value.map((v) => String(v).trim()).filter(Boolean);
+    return String(value)
+      .split(",")
+      .map((v) => v.trim())
+      .filter(Boolean);
+  }
+
+  function toggleOption(field, option) {
+    setForm((prev) => {
+      const list = normalizeOptionArray(prev[field]);
+      const exists = list.includes(option);
+      const next = exists ? list.filter((v) => v !== option) : [...list, option];
+      return { ...prev, [field]: next };
+    });
+  }
+
+  function addCustomOption(field, value) {
+    const cleaned = String(value || "").trim();
+    if (!cleaned) return;
+    setForm((prev) => {
+      const list = normalizeOptionArray(prev[field]);
+      if (list.includes(cleaned)) return prev;
+      return { ...prev, [field]: [...list, cleaned] };
+    });
+  }
+
   function startEditProduct(p) {
     setMsg("");
     setShowProductForm(true);
@@ -403,7 +479,12 @@ export default function Admin() {
       category: p.category || "",
       stock: String(p.stock ?? "0"),
       image_url: p.image_url || "",
+      length_options: normalizeOptionArray(p.length_options),
+      color_options: normalizeOptionArray(p.color_options),
     });
+
+    setCustomLength("");
+    setCustomColor("");
 
     setProductImageFile(null);
     setProductImagePreview("");
@@ -422,7 +503,12 @@ export default function Admin() {
       category: "",
       stock: "0",
       image_url: "",
+      length_options: [],
+      color_options: [],
     });
+
+    setCustomLength("");
+    setCustomColor("");
 
     setProductImageFile(null);
     setProductImagePreview("");
@@ -450,6 +536,8 @@ export default function Admin() {
         price: Number(form.price),
         stock: Number(form.stock),
         image_url: finalImageUrl,
+        length_options: normalizeOptionArray(form.length_options),
+        color_options: normalizeOptionArray(form.color_options),
       };
 
       const { error } = editingProductId
@@ -465,7 +553,12 @@ export default function Admin() {
         category: "",
         stock: "0",
         image_url: "",
+        length_options: [],
+        color_options: [],
       });
+
+      setCustomLength("");
+      setCustomColor("");
 
       setProductImageFile(null);
       setProductImagePreview("");
@@ -763,11 +856,10 @@ export default function Admin() {
   );
 
   const categories = useMemo(() => {
-    const dbCats = Array.from(
-      new Set(products.map((p) => p.category).filter(Boolean))
+    const dbCats = products.map((p) => p.category).filter(Boolean);
+    return buildCategoryList([...DEFAULT_CATEGORIES, ...dbCats]).filter(
+      (c) => normalizeCategoryKey(c) !== "writing"
     );
-    const allCats = Array.from(new Set([...DEFAULT_CATEGORIES, ...dbCats])).filter(c => c !== "Writing").sort();
-    return allCats;
   }, [products]);
 
   const filteredOrders = useMemo(() => {
@@ -775,7 +867,9 @@ export default function Admin() {
 
     return orders.filter((o) => {
       const status = normalizeOrderStatus(o?.status);
-      const categoryOk = oCategory === "All" || status === oCategory;
+      const categoryOk = oCategory === "All"
+        ? status !== "Completed"
+        : status === oCategory;
       if (!categoryOk) return false;
 
       if (!q) return true;
@@ -806,6 +900,11 @@ export default function Admin() {
       );
     });
   }, [users, uSearch]);
+
+  const toShipCount = useMemo(
+    () => orders.filter((o) => normalizeOrderStatus(o?.status) === "To Ship").length,
+    [orders]
+  );
 
   const paymentOrders = useMemo(
     () => orders.filter((o) => normalizeOrderStatus(o?.status) === "Out for Delivery"),
@@ -1330,32 +1429,46 @@ export default function Admin() {
             <button
               type="button"
               onClick={() => setTab("orders")}
-              className={`w-full flex items-center gap-2.5 text-left px-3 py-2 rounded-xl text-sm font-medium border transition ${
+              className={`w-full flex items-center justify-between gap-2 text-left px-3 py-2 rounded-xl text-sm font-medium border transition ${
                 tab === "orders"
                   ? "bg-emerald-50 text-emerald-800 border-emerald-200"
                   : "bg-white border-transparent text-gray-700 hover:bg-emerald-50/70 hover:text-emerald-700"
               }`}
             >
-              <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" className="h-4 w-4 shrink-0">
-                <path d="M7 4h10a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" />
-                <path d="M9 9h6M9 13h6M9 17h4" />
-              </svg>
-              Orders
+              <span className="flex items-center gap-2.5">
+                <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" className="h-4 w-4 shrink-0">
+                  <path d="M7 4h10a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" />
+                  <path d="M9 9h6M9 13h6M9 17h4" />
+                </svg>
+                Orders
+              </span>
+              {toShipCount > 0 && (
+                <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-50 border border-amber-200 text-amber-700">
+                  {toShipCount}
+                </span>
+              )}
             </button>
             <button
               type="button"
               onClick={() => setTab("payments")}
-              className={`w-full flex items-center gap-2.5 text-left px-3 py-2 rounded-xl text-sm font-medium border transition ${
+              className={`w-full flex items-center justify-between gap-2 text-left px-3 py-2 rounded-xl text-sm font-medium border transition ${
                 tab === "payments"
                   ? "bg-emerald-50 text-emerald-800 border-emerald-200"
                   : "bg-white border-transparent text-gray-700 hover:bg-emerald-50/70 hover:text-emerald-700"
               }`}
             >
-              <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" className="h-4 w-4 shrink-0">
-                <path d="M5 5h14v14H5z" />
-                <path d="M9 9h6M9 13h6M9 17h4" />
-              </svg>
-              Reports
+              <span className="flex items-center gap-2.5">
+                <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" className="h-4 w-4 shrink-0">
+                  <path d="M5 5h14v14H5z" />
+                  <path d="M9 9h6M9 13h6M9 17h4" />
+                </svg>
+                Reports
+              </span>
+              {paymentOrders.length > 0 && (
+                <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-sky-50 border border-sky-200 text-sky-700">
+                  {paymentOrders.length}
+                </span>
+              )}
             </button>
             <button
               type="button"
@@ -1714,17 +1827,98 @@ export default function Admin() {
 
                     <div>
                       <label className="text-sm font-medium">Category</label>
-                      <select
+                      <input
+                        list="admin-category-list"
                         value={form.category}
                         onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
                         className="mt-1 w-full px-3 py-2 rounded-lg border bg-white"
-                      >
-                        {categories.filter(c => c !== "All").map((c) => (
-                          <option key={c} value={c}>
-                            {c}
-                          </option>
+                        placeholder="Type or select a category"
+                      />
+                      <datalist id="admin-category-list">
+                        {categories.map((c) => (
+                          <option key={c} value={c} />
                         ))}
-                      </select>
+                      </datalist>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-sm font-medium">Length options (optional)</label>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {LENGTH_PRESETS.map((opt) => (
+                            <button
+                              key={opt}
+                              type="button"
+                              onClick={() => toggleOption("length_options", opt)}
+                              className={`px-3 py-1.5 rounded-full text-xs border transition ${
+                                form.length_options.includes(opt)
+                                  ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                                  : "bg-white border-gray-200 text-gray-700 hover:bg-emerald-50/70"
+                              }`}
+                            >
+                              {opt}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="mt-2 flex items-center gap-2">
+                          <input
+                            value={customLength}
+                            onChange={(e) => setCustomLength(e.target.value)}
+                            className="h-10 px-3 rounded-lg border w-full sm:w-40"
+                            placeholder="Custom"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              addCustomOption("length_options", customLength);
+                              setCustomLength("");
+                            }}
+                            className="h-10 px-4 rounded-lg border bg-white hover:bg-gray-50 text-sm shrink-0"
+                          >
+                            Add
+                          </button>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="text-sm font-medium">Color options (optional)</label>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {COLOR_PRESETS.map((opt) => (
+                            <button
+                              key={opt}
+                              type="button"
+                              onClick={() => toggleOption("color_options", opt)}
+                              className={`px-3 py-1.5 rounded-full text-xs border transition ${
+                                form.color_options.includes(opt)
+                                  ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                                  : "bg-white border-gray-200 text-gray-700 hover:bg-emerald-50/70"
+                              }`}
+                            >
+                              {opt}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="mt-2 flex items-center gap-2">
+                          <input
+                            value={customColor}
+                            onChange={(e) => setCustomColor(e.target.value)}
+                            className="h-10 px-3 rounded-lg border w-full sm:w-40"
+                            placeholder="Custom"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              addCustomOption("color_options", customColor);
+                              setCustomColor("");
+                            }}
+                            className="h-10 px-4 rounded-lg border bg-white hover:bg-gray-50 text-sm shrink-0"
+                          >
+                            Add
+                          </button>
+                        </div>
+                      </div>
                     </div>
 
                     <div>
@@ -1938,8 +2132,6 @@ export default function Admin() {
                           <div className="font-semibold">{o.payment_method || "—"}</div>
                           <div className="text-xs text-gray-500 mt-2">Total</div>
                           <div className="font-semibold">{money(o.total)}</div>
-                          <div className="text-xs text-gray-500 mt-2">Shipping Fee</div>
-                          <div className="font-semibold">{money(o.shipping_fee || 0)}</div>
                         </div>
                       </div>
 
@@ -2277,10 +2469,6 @@ export default function Admin() {
               <div className="border rounded-xl p-3 bg-gray-50">
                 <div className="text-xs text-gray-500">Completed Orders</div>
                 <div className="text-xl font-semibold mt-1">{filteredSalesOrders.length}</div>
-              </div>
-              <div className="border rounded-xl p-3 bg-gray-50">
-                <div className="text-xs text-gray-500">Shipping Fee</div>
-                <div className="text-xl font-semibold mt-1">{money(totalShippingFee)}</div>
               </div>
               <div className="border rounded-xl p-3 bg-gray-50">
                 <div className="text-xs text-gray-500">Products Sold</div>
